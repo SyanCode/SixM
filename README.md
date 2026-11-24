@@ -1,37 +1,34 @@
+**English** · [Français](README.fr.md) · [Español](README.es.md) · [Deutsch](README.de.md) · [Português](README.pt-BR.md) · [中文](README.zh-CN.md) · [日本語](README.ja.md) · [Русский](README.ru.md)
+
 # SixM
 
-Framework multijoueur / modding **agnostique du jeu**, dans l'esprit de FiveM, pensé pour GTA VI sur PC
-et les projets de portage. Le code est entièrement original.
+A **game-agnostic** multiplayer / modding framework, in the spirit of FiveM, designed for GTA VI on PC and port projects. All code is original.
 
-## État actuel (v0.1)
+## Status (v0.1)
 
-| Brique | Statut |
+| Component | Status |
 |---|---|
-| Serveur dédié (WebSocket, tick, snapshots, rate-limit) | ✅ |
-| Système de ressources (`resource.json`, start/stop/restart, scripts serveur + client) | ✅ |
-| API de script (`sixm.on`, `onNet`, `emitClient`, `emitAllClients`, `getPlayers`, `kick`) | ✅ |
-| Client de référence + adaptateur simulé (`mock`) + bot de test | ✅ |
-| **Adaptateur pour un vrai jeu** (`GameAdapter`) | ⛔ à écrire, voir ci-dessous |
+| Dedicated server (WebSocket, tick, snapshots, rate limiting) | ✅ |
+| Resource system (`resource.json`, start/stop/restart, server + client scripts) | ✅ |
+| Script API (`sixm.on`, `onNet`, `emitClient`, `emitAllClients`, `getPlayers`, `kick`) | ✅ |
+| Reference client + mock adapter + test bot | ✅ |
+| **Adapter for a real game** (`GameAdapter`) | ⛔ to be written, see below |
 
-## Démarrage
+## Getting started
 
 ```bash
 npm install
-npm start          # serveur sur ws://localhost:30120
-npm run bot        # (autre terminal) un bot qui se déplace et parle
+npm start          # server on ws://localhost:30120
+npm run bot        # (another terminal) a bot that moves and chats
 npm test
 ```
 
-Console serveur : `start|stop|restart <ressource>`, `players`, `resources`, `quit`.
+Server console: `start|stop|restart <resource>`, `players`, `resources`, `quit`.
 
-## Ce que SixM ne fait pas (et pourquoi)
+## What SixM does not do (and why)
 
-- **GTA VI n'a pas de version PC officielle ni de support de mods** : il n'existe donc aucun point d'accroche
-  légitime à ce jour. `client/adapter.js` définit le contrat à implémenter le jour où il y en a un
-  (API officielle, ou projet de portage qui autorise explicitement les plugins).
-- Le dépôt **ne contient ni n'utilisera** de code, d'assets ou de binaires Rockstar, ni de fuites
-  ou de builds piratés. Ne les ajoutez pas.
-- Les scripts sont isolés par `node:vm`, ce qui **n'est pas** une sandbox de sécurité : n'exécutez que des
-  ressources de confiance.
+- **GTA VI has no official PC release or mod support**, so there is currently no legitimate hook point. `client/adapter.js` defines the contract to implement once one exists (official API, or a port project that explicitly allows plugins).
+- This repository **contains and will contain no** Rockstar code, assets or binaries, nor leaks or pirated builds. Do not add them.
+- Scripts are isolated with `node:vm`, which is **not** a security sandbox: only run trusted resources.
 
-Voir `docs/ARCHITECTURE.md` et `docs/PROTOCOL.md`.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/PROTOCOL.md](docs/PROTOCOL.md).
