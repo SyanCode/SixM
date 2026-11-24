@@ -1,0 +1,20 @@
+/**
+ * Interface GameAdapter : seule couche dépendante du jeu.
+ *
+ * SixM est volontairement agnostique : le serveur, le protocole et les ressources
+ * ne connaissent rien de GTA VI. Pour brancher un vrai jeu / portage PC, on
+ * implémente cette interface (ex. via un plugin natif, un script-hook officiel,
+ * ou l'API d'un projet de portage qui l'autorise).
+ */
+export class GameAdapter {
+  /** Appelé au démarrage ; `onReady` quand le jeu est prêt. */
+  async init() { throw new Error('non implémenté'); }
+  /** Position du joueur local: { x, y, z, h }. */
+  getLocalPlayerPosition() { throw new Error('non implémenté'); }
+  /** Applique la position d'un joueur distant (ped/avatar). */
+  setRemotePlayer(id, name, pos) { throw new Error('non implémenté'); }
+  removeRemotePlayer(id) { throw new Error('non implémenté'); }
+  /** Affichage de texte (chat, notifications). */
+  log(text) { throw new Error('non implémenté'); }
+  async shutdown() {}
+}

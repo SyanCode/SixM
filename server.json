@@ -1,0 +1,9 @@
+{
+  "name": "Serveur SixM",
+  "port": 30120,
+  "maxPlayers": 64,
+  "tickRate": 20,
+  "resourcesDir": "resources",
+  "autostart": ["hello"],
+  "gameAdapter": "mock"
+}
