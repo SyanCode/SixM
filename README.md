@@ -12,7 +12,8 @@ A **game-agnostic** multiplayer / modding framework, in the spirit of FiveM, des
 | Resource system (`resource.json`, start/stop/restart, server + client scripts) | ✅ |
 | Script API (`sixm.on`, `onNet`, `emitClient`, `emitAllClients`, `getPlayers`, `kick`) | ✅ |
 | Reference client + mock adapter + test bot | ✅ |
-| **Adapter for a real game** (`GameAdapter`) | ⛔ to be written, see below |
+| `victory` adapter ([VIctory](https://github.com/Marvisak/VIctory)), SixM side + local protocol | ✅ tested against a fake bridge |
+| **VIctory-side bridge module** (reads/writes game state) | ⛔ to be written, see [integrations/victory/PROTOCOL.md](integrations/victory/PROTOCOL.md) |
 
 ## Getting started
 
