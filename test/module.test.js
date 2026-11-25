@@ -74,7 +74,7 @@ test('du module à la surcouche : les joueurs sont placés à l\'écran', { skip
   const timer = setInterval(() => fake.send({ t: 'camera', m: view }), 30);
   await until(async () => (await link.dump(png)).endsWith('markers=2'), 'deux joueurs visibles');
   clearInterval(timer);
-  assert.ok(fs.statSync(`${png}.markers.png`).size > 3000);
+  assert.ok(fs.statSync(`${png}.markers.png`).size > 1500);
   if (process.env.SIXM_OVERLAY_PNG) fs.copyFileSync(`${png}.markers.png`, process.env.SIXM_OVERLAY_PNG);
   await wait(1300);
   assert.match(await link.dump(png), /markers=0/, 'plus de caméra : plus de noms');

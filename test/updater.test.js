@@ -84,7 +84,7 @@ test('jamais pendant une partie ; portable : signale seulement', async () => {
 
 test('source : avance rapide réelle de git, dossier modifié ou branche respectés', async () => {
   const base = tmp(), origin = path.join(base, 'origin'), work = path.join(base, 'work');
-  const git = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, stdio: 'pipe' }).toString().trim();
+  const git = (cwd, ...a) => execFileSync('git', ['-c', 'safe.directory=*', '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, stdio: 'pipe' }).toString().trim();
   fs.mkdirSync(origin);
   git(origin, 'init', '-q', '-b', 'main');
   const commit = (text) => { fs.writeFileSync(path.join(origin, 'package.json'), JSON.stringify({ version: '0.2.0', text })); git(origin, 'add', '-A'); git(origin, 'commit', '-q', '-m', text); };

@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: 24
       - run: npm ci --ignore-scripts
-      - run: npm test
+      - run: npm run test:ci
 
   build:
     runs-on: windows-latest
@@ -37,7 +37,7 @@ jobs:
         with:
           node-version: 24
       - run: npm ci --ignore-scripts
-      - run: npm test
+      - run: npm run test:ci
       - name: Tests du module VIctory
         run: cargo test --manifest-path integrations/victory/sixm-bridge/Cargo.toml
       - run: npm run package
