@@ -11,25 +11,37 @@ A **game-agnostic** multiplayer / modding framework, in the spirit of FiveM, des
 | Dedicated server (WebSocket, tick, snapshots, rate limiting) | ✅ |
 | Resource system (`resource.json`, start/stop/restart, server + client scripts) | ✅ |
 | Script API (`sixm.on`, `onNet`, `emitClient`, `emitAllClients`, `getPlayers`, `kick`) | ✅ |
+| Self-hosting (`sixm init` / `start`, password, bans, admin console, `info.json`) | ✅ |
+| Client interface: play, host, mods, downloadable server | ✅ (French UI) |
+| Client scripts isolated in QuickJS/WebAssembly | ✅ |
 | Reference client + mock adapter + test bot | ✅ |
 | `victory` adapter ([VIctory](https://github.com/Marvisak/VIctory)), SixM side + local protocol | ✅ tested against a fake bridge |
 | **VIctory-side bridge module** (reads/writes game state) | ⛔ to be written, see [integrations/victory/PROTOCOL.md](integrations/victory/PROTOCOL.md) |
 
 ## Getting started
 
+Windows: double-click `SixM.bat` ([Node.js](https://nodejs.org) required). Elsewhere: `npm install`, then `npm run app`.
+
+- **Play**: address, favourites, chat, players, radar.
+- **Host**: a server on this PC in two clicks, mods by dropping a zip.
+- **Download the server**: self-contained zip for a VPS, another PC or Docker.
+
+Command line:
+
 ```bash
 npm install
-npm start          # server on ws://localhost:30120
+node bin/sixm.js init ../my-server    # create your own server, then: node bin/sixm.js start ../my-server
+npm start          # demo server on ws://localhost:30120
 npm run bot        # (another terminal) a bot that moves and chats
 npm test
 ```
 
-Server console: `start|stop|restart <resource>`, `players`, `resources`, `quit`.
+Hosting guide (French): [docs/HOSTING.md](docs/HOSTING.md). Server console: type `help`.
 
 ## What SixM does not do (and why)
 
 - **GTA VI has no official PC release or mod support**, so there is currently no legitimate hook point. `client/adapter.js` defines the contract to implement once one exists (official API, or a port project that explicitly allows plugins).
 - This repository **contains and will contain no** Rockstar code, assets or binaries, nor leaks or pirated builds. Do not add them.
-- Scripts are isolated with `node:vm`, which is **not** a security sandbox: only run trusted resources.
+- **Server** scripts run in `node:vm`, which is **not** a security sandbox: hosts must only install trusted resources.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/PROTOCOL.md](docs/PROTOCOL.md).

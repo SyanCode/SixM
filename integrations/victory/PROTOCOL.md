@@ -26,6 +26,16 @@ connecte comme client. Le bridge lit/écrit l'état du jeu ; le serveur SixM ne 
 - Le jeu est hors-ligne par conception côté VIctory : SixM ne touche pas aux services en ligne de
   l'éditeur ; il synchronise uniquement ses propres messages vers le serveur SixM.
 
+## Reconnexion
+Si le bridge se ferme, l'adaptateur se reconnecte (contrôle du build compris) et renvoie un `setRemote`
+par joueur distant connu. Le bridge doit donc partir d'un état vide à chaque connexion. Entre-temps,
+la position locale est inconnue et rien n'est envoyé au serveur. `ready` est attendu sous 5 s.
+
+## Tester sans jeu
+```bash
+npm run sim-bridge    # bridge simulé sur 127.0.0.1:30121
+```
+
 ## Utilisation
 ```bash
 node client/run.js ws://serveur:30120 MonPseudo victory

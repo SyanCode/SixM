@@ -3,7 +3,7 @@
   "port": 30120,
   "maxPlayers": 64,
   "tickRate": 20,
+  "syncRadius": 0,
   "resourcesDir": "resources",
-  "autostart": ["hello"],
-  "gameAdapter": "mock"
+  "autostart": ["hello"]
 }

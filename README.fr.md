@@ -11,24 +11,36 @@ Framework multijoueur / modding **agnostique du jeu**, dans l'esprit de FiveM, p
 | Serveur dédié (WebSocket, tick, snapshots, rate-limit) | ✅ |
 | Système de ressources (`resource.json`, start/stop/restart, scripts serveur + client) | ✅ |
 | API de script (`sixm.on`, `onNet`, `emitClient`, `emitAllClients`, `getPlayers`, `kick`) | ✅ |
+| Hébergement (`sixm init` / `start`, mot de passe, bans, console, `info.json`) | ✅ |
+| Interface client : jouer, héberger, mods, serveur à télécharger | ✅ |
+| Scripts client isolés dans QuickJS/WebAssembly | ✅ |
 | Client de référence + adaptateur simulé + bot de test | ✅ |
 | **Adaptateur pour un vrai jeu** (`GameAdapter`) | ⛔ à écrire, voir ci-dessous |
 
 ## Démarrage
 
+Windows : double-cliquez sur `SixM.bat` ([Node.js](https://nodejs.org) requis). Ailleurs : `npm install` puis `npm run app`.
+
+- **Jouer** : adresse, favoris, chat, joueurs, radar.
+- **Héberger** : serveur sur ce PC en deux clics, mods par glisser-déposer d'un zip.
+- **Télécharger le serveur** : zip autonome pour un VPS, un autre PC ou Docker.
+
+En ligne de commande :
+
 ```bash
 npm install
-npm start          # serveur sur ws://localhost:30120
+node bin/sixm.js init ../mon-serveur  # créer son serveur, puis : node bin/sixm.js start ../mon-serveur
+npm start          # serveur de démo sur ws://localhost:30120
 npm run bot        # (autre terminal) un bot qui se déplace et parle
 npm test
 ```
 
-Console serveur : `start|stop|restart <ressource>`, `players`, `resources`, `quit`.
+Héberger : [docs/HOSTING.md](docs/HOSTING.md). Console serveur : tapez `help`.
 
 ## Ce que SixM ne fait pas (et pourquoi)
 
 - **GTA VI n'a pas de version PC officielle ni de support de mods** : il n'existe donc aucun point d'accroche légitime. `client/adapter.js` définit le contrat à implémenter le jour où il y en a un (API officielle, ou projet de portage qui autorise explicitement les plugins).
 - Le dépôt **ne contient ni n'utilisera** de code, d'assets ou de binaires Rockstar, ni de fuites ou de builds piratés. Ne les ajoutez pas.
-- Les scripts sont isolés par `node:vm`, ce qui **n'est pas** une sandbox de sécurité : n'exécutez que des ressources de confiance.
+- Les scripts **serveur** tournent dans `node:vm`, ce qui **n'est pas** une sandbox de sécurité : l'hébergeur ne doit installer que des ressources de confiance.
 
 Voir [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) et [docs/PROTOCOL.md](docs/PROTOCOL.md).

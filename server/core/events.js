@@ -19,7 +19,7 @@ export class EventBus {
     const set = this.#handlers.get(name);
     if (!set) return;
     for (const { fn } of [...set]) {
-      try { fn(...args); }
+      try { Promise.resolve(fn(...args)).catch((err) => console.error(`[events] erreur dans "${name}":`, err)); }
       catch (err) { console.error(`[events] erreur dans "${name}":`, err); }
     }
   }

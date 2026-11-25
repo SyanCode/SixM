@@ -1,13 +1,18 @@
-import fs from 'node:fs';
-import readline from 'node:readline';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { EventBus } from './core/events.js';
 import { World } from './core/world.js';
 import { ResourceManager } from './core/resources.js';
 import { Network } from './core/network.js';
+import { BanList } from './bans.js';
+import { loadConfig, normalizeConfig } from './config.js';
+import { startConsole } from './console.js';
 
-export async function createServer(config) {
+export async function createServer(rawConfig) {
+  const config = normalizeConfig(rawConfig);
   const events = new EventBus();
   const world = new World();
+  const bans = new BanList(config.bansFile);
   let net;
 
   // API exposée aux scripts serveur de chaque ressource (global `sixm`).
@@ -18,32 +23,54 @@ export async function createServer(config) {
     emitAllClients: (name, ...args) => net.broadcast({ t: 'event', name, args }),
     getPlayers: () => world.snapshot(),
     kick: (id, reason) => net.kick(id, reason),
+    ban: (id, reason) => net.ban(id, reason),
   });
 
   const resources = new ResourceManager({ dir: config.resourcesDir, events, api });
-  net = new Network({ port: config.port, world, events, config, resources });
+  net = new Network({ port: config.port, world, events, config, resources, bans });
 
-  for (const r of config.autostart ?? []) resources.start(r);
+  // "*" : tous les mods déposés dans le dossier des ressources.
+  const autostart = config.autostart.includes('*') ? resources.list() : config.autostart;
+  for (const r of autostart) {
+    // Une ressource cassée ne doit pas empêcher le serveur de démarrer.
+    try { resources.start(r); } catch (e) { console.error(`[resources] échec de "${r}" : ${e.message}`); }
+  }
   const port = await net.start();
-  console.log(`[sixm] "${config.name}" en écoute sur ws://localhost:${port}`);
-  return { events, world, resources, net, stop: () => net.stop() };
+  console.log(`[sixm] "${config.name}" en écoute sur ws://localhost:${port}${config.password ? ' (mot de passe)' : ''}`);
+  return {
+    config, events, world, resources, net, bans,
+    stop: async () => {
+      for (const r of [...resources.running.keys()]) resources.stop(r);
+      await net.stop();
+    },
+  };
+}
+
+/** Lance un serveur depuis un dossier contenant server.json, avec console et arrêt propre. */
+export async function hostDirectory(dir) {
+  const config = loadConfig(dir);
+  const srv = await createServer(config).catch((e) => {
+    throw e.code === 'EADDRINUSE' ? new Error(`le port ${config.port} est déjà utilisé`) : e;
+  });
+  let stopping = false;
+  srv.shutdown = async () => {
+    if (stopping) return;
+    stopping = true;
+    await srv.stop();
+    process.exit(0);
+  };
+  process.on('SIGINT', srv.shutdown);
+  process.on('SIGTERM', srv.shutdown);
+  startConsole(srv);
+  return srv;
 }
 
 // Lancement direct : `npm start`
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const config = JSON.parse(fs.readFileSync(new URL('../server.json', import.meta.url), 'utf8'));
-  const srv = await createServer(config);
-  const rl = readline.createInterface({ input: process.stdin });
-  rl.on('line', (line) => {
-    const [cmd, arg] = line.trim().split(/\s+/);
-    try {
-      if (cmd === 'start') srv.resources.start(arg);
-      else if (cmd === 'stop') srv.resources.stop(arg);
-      else if (cmd === 'restart') srv.resources.restart(arg);
-      else if (cmd === 'players') console.table(srv.world.snapshot().map(({ id, name }) => ({ id, name })));
-      else if (cmd === 'resources') console.log(srv.resources.list(), [...srv.resources.running.keys()]);
-      else if (cmd === 'quit') process.exit(0);
-      else if (cmd) console.log('commandes: start|stop|restart <res>, players, resources, quit');
-    } catch (e) { console.error(e.message); }
-  });
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    await hostDirectory(path.join(path.dirname(fileURLToPath(import.meta.url)), '..'));
+  } catch (e) {
+    console.error(`[sixm] ${e.message}`);
+    process.exit(1);
+  }
 }

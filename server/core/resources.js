@@ -32,28 +32,51 @@ export class ResourceManager {
     if (path.dirname(root) !== this.dir) throw new Error('nom de ressource invalide');
     const manifest = JSON.parse(fs.readFileSync(path.join(root, 'resource.json'), 'utf8'));
 
+    const timers = new Set();
+    const track = (id) => { timers.add(id); return id; };
     const sandbox = {
       console: { log: (...a) => console.log(`[${name}]`, ...a), error: (...a) => console.error(`[${name}]`, ...a) },
-      setTimeout, clearTimeout, setInterval, clearInterval,
+      // Suivis pour être coupés à l'arrêt de la ressource.
+      setTimeout: (fn, ms, ...a) => {
+        const id = track(setTimeout(() => { timers.delete(id); fn(...a); }, ms));
+        return id;
+      },
+      setInterval: (fn, ms, ...a) => track(setInterval(fn, ms, ...a)),
+      clearTimeout: (id) => { timers.delete(id); clearTimeout(id); },
+      clearInterval: (id) => { timers.delete(id); clearInterval(id); },
       sixm: this.api(name),
     };
     const ctx = vm.createContext(sandbox, { codeGeneration: { strings: false, wasm: false } });
 
-    for (const file of manifest.server ?? []) {
+    const read = (file) => {
       const full = path.resolve(root, file);
       if (!full.startsWith(root + path.sep)) throw new Error(`chemin hors ressource: ${file}`);
-      new vm.Script(fs.readFileSync(full, 'utf8'), { filename: full }).runInContext(ctx, { timeout: 2000 });
+      return { full, source: fs.readFileSync(full, 'utf8') };
+    };
+    let clientFiles;
+    try {
+      clientFiles = (manifest.client ?? []).map((f) => ({ file: f, source: read(f).source }));
+      for (const file of manifest.server ?? []) {
+        const { full, source } = read(file);
+        new vm.Script(source, { filename: full }).runInContext(ctx, { timeout: 2000 });
+      }
+    } catch (e) {
+      // Démarrage raté : ne laisser ni handlers ni timers derrière.
+      this.events.removeOwner(name);
+      for (const id of timers) clearTimeout(id);
+      throw e;
     }
-    const clientFiles = (manifest.client ?? []).map((f) => ({
-      file: f, source: fs.readFileSync(path.resolve(root, f), 'utf8'),
-    }));
-    this.running.set(name, { manifest, clientFiles });
+    this.running.set(name, { manifest, clientFiles, timers });
     this.events.emit('resourceStart', name);
     console.log(`[resources] démarrée: ${name}`);
   }
 
   stop(name) {
-    if (!this.running.delete(name)) return false;
+    const res = this.running.get(name);
+    if (!res) return false;
+    this.running.delete(name);
+    for (const id of res.timers) clearTimeout(id);
+    res.timers.clear();
     this.events.removeOwner(name);
     this.events.emit('resourceStop', name);
     return true;

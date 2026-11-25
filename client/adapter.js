@@ -9,7 +9,7 @@
 export class GameAdapter {
   /** Appelé au démarrage ; `onReady` quand le jeu est prêt. */
   async init() { throw new Error('non implémenté'); }
-  /** Position du joueur local: { x, y, z, h }. */
+  /** Position du joueur local: { x, y, z, h } (h en radians), ou null si inconnue. */
   getLocalPlayerPosition() { throw new Error('non implémenté'); }
   /** Applique la position d'un joueur distant (ped/avatar). */
   setRemotePlayer(id, name, pos) { throw new Error('non implémenté'); }
