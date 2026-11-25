@@ -1,0 +1,90 @@
+# Publie une version quand celle de package.json n'existe pas encore. Pour publier : changez "version"
+# et poussez sur main. Sans nouvelle version, seuls les tests et l'empaquetage tournent.
+name: Release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: release
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  test-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: npm ci --ignore-scripts
+      - run: npm test
+
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm run package
+      - name: Essai de l'installateur
+        shell: powershell
+        run: .\packaging\test-setup.ps1
+      - id: version
+        shell: bash
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sixm
+          path: |
+            dist/SixM-*
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+  publish:
+    needs: [test-linux, build]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.build.outputs.version }}
+      RUN_ID: ${{ github.run_id }}
+      COMMIT: ${{ github.sha }}
+    steps:
+      - name: Publier si la version est nouvelle
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "version invalide"; exit 1; }
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION existe déjà : rien à publier"
+            exit 0
+          fi
+          gh run download "$RUN_ID" --name sixm --dir files
+          (cd files && sha256sum --check SHA256SUMS.txt)
+          cat > notes.md <<EOF
+          **Windows** : téléchargez \`SixM-Setup-$VERSION.exe\` et lancez-le. Aucun droit d'administrateur, Node.js est inclus.
+          Le programme n'est pas signé : Windows peut afficher un avertissement SmartScreen.
+
+          - \`SixM-portable-$VERSION.zip\` : sans installation, lancez \`SixM.exe\`.
+          - \`SixM-Server-$VERSION.zip\` : serveur seul, pour un hébergement (Node.js requis).
+          - \`SHA256SUMS.txt\` : empreintes des fichiers.
+
+          SixM ne fournit ni jeu ni VIctory.
+          EOF
+          gh release create "v$VERSION" files/* --target "$COMMIT" --title "SixM $VERSION" --notes-file notes.md --generate-notes

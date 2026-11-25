@@ -4,6 +4,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const CLI = path.join(root, 'bin', 'sixm.js');
+// SixM installé : Node.js est fourni à côté et n'est pas forcément dans le PATH.
+const bundled = path.join(root, '..', 'node', 'node.exe');
+const NODE = fs.existsSync(bundled) ? `"${bundled.replaceAll('%', '%%')}"` : 'node';
 
 /** Crée un dossier de serveur prêt à lancer. `overrides` complète server.json. */
 export function scaffoldServer(dir, overrides = {}) {
@@ -20,7 +23,7 @@ export function scaffoldServer(dir, overrides = {}) {
   }, null, 2) + '\n');
   // server.json peut contenir le mot de passe, bans.json contient des adresses IP.
   write('.gitignore', 'server.json\nbans.json\n');
-  write('start.bat', `@echo off\r\nchcp 65001 >nul\r\nnode "${CLI.replaceAll('%', '%%')}" start "%~dp0."\r\npause\r\n`);
+  write('start.bat', `@echo off\r\nchcp 65001 >nul\r\n${NODE} "${CLI.replaceAll('%', '%%')}" start "%~dp0."\r\npause\r\n`);
   write('start.sh', `#!/bin/sh\nexec node '${CLI.replaceAll("'", "'\\''")}' start "$(dirname "$0")"\n`, { mode: 0o755 });
   const hello = path.join(target, 'resources', 'hello');
   if (!fs.existsSync(hello)) fs.cpSync(path.join(root, 'resources', 'hello'), hello, { recursive: true });

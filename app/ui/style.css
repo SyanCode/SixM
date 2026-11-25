@@ -58,7 +58,7 @@ nav button:focus-visible { outline: 2px solid var(--accent); }
 /* Contenu */
 main { overflow: auto; padding: 28px 24px 40px; scrollbar-gutter: stable both-edges; }
 .page { max-width: 1040px; margin: 0 auto; animation: in .22s ease-out; }
-@keyframes in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes in { from { transform: translateY(6px); } }
 .head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
 .head p { margin-top: 6px; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -223,3 +223,19 @@ dialog .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top
   .radar { max-width: 260px; }
 }
 @media (prefers-reduced-motion: reduce) { *, ::after, ::before { animation: none !important; transition: none !important; } }
+
+/* Installation de VIctory */
+.victory { display: grid; gap: 16px; margin-bottom: 16px; }
+.settings .victory { margin: 0; }
+.victory .ico { width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); flex: none; }
+.victory .ico svg { width: 24px; height: 24px; }
+.victory .note { margin: 0; }
+.needs { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }
+.need { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 14px; background: var(--raise); min-height: 60px; }
+.need strong { display: block; font-weight: 600; }
+.need span.small { display: block; overflow-wrap: anywhere; }
+.meter.big { height: 10px; border-radius: 5px; flex: none; }
+.meter.big i { background: var(--accent); border-radius: 5px; }
+.meter.wait i { animation: wait 1.4s ease-in-out infinite alternate; }
+@keyframes wait { from { opacity: .25; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .meter.wait i { animation: none; opacity: .6; } }

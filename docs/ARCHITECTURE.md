@@ -5,6 +5,7 @@ SixM.bat                  lance l'interface sous Windows
 app/server.js             interface locale : API sur 127.0.0.1, jeton par session
 app/ui/                   pages de l'interface (sans dépendance)
 app/session.js, hosts.js  partie en cours ; serveurs hébergés
+app/builder.js            télécharge et compile VIctory (git, cargo), sans code de VIctory ici
 app/launcher.js           lance VIctory sur l'installation choisie
 app/mods.js, pack.js      import de mods ; serveur téléchargeable (zip.js)
 bin/sixm.js               CLI : app, init, start, pack, info, connect
@@ -25,6 +26,15 @@ client/sandbox.js         scripts client isolés (QuickJS/WebAssembly)
 client/adapter.js         contrat GameAdapter  <-- seule partie dépendante du jeu
 client/adapters/mock.js   adaptateur de test
 ```
+
+## Installer VIctory
+`app/builder.js` clone le dépôt public dans `~/SixM/victory/src` au commit `PINNED` et lance
+`cargo build --release -p victory --locked`. Le résultat n'est adopté qu'après vérification (`victory.exe --help`) ;
+une version par commit dans `builds/`, avec sa licence GPL-3. Rien ne se lance sans clic.
+
+## Publier une version
+Changez `version` dans `package.json` puis poussez sur `main` : `.github/workflows/release.yml` teste, fabrique
+l'installateur, l'essaie et publie. Localement : `npm ci && npm run package`, puis `packaging/test-setup.ps1`.
 
 ## Brancher un jeu
 Implémenter `GameAdapter` (position locale, avatars distants, affichage) dans un plugin natif chargé par

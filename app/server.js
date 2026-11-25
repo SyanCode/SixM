@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { queryServer } from '../client/address.js';
 import { linkSupported, pickPath, startLink } from '../client/link.js';
+import { isExe, VictoryBuilder } from './builder.js';
 import { Hosts, lanAddress } from './hosts.js';
 import { findVictory, Launcher, resolveGame } from './launcher.js';
 import { Session } from './session.js';
@@ -36,7 +37,7 @@ class HttpError extends Error {
  * fichiers : chaque appel exige le jeton de la session et un en-tête Host exact, pour qu'aucun site
  * web ouvert dans le navigateur ne puisse la piloter (CSRF, DNS rebinding).
  */
-export async function createApp({ dataDir, port = 0, adapterOptions, onQuit = () => {} }) {
+export async function createApp({ dataDir, port = 0, adapterOptions, builderOptions = {}, onQuit = () => {} }) {
   const token = crypto.randomBytes(24).toString('base64url');
   const settings = new Settings(dataDir);
   const hosts = new Hosts(path.join(dataDir, 'servers'));
@@ -46,6 +47,17 @@ export async function createApp({ dataDir, port = 0, adapterOptions, onQuit = ()
   const launcher = new Launcher(path.join(dataDir, 'logs'), {
     onExit: (error) => { if (session.adapterName === 'victory') session.disconnect(error ?? 'le jeu est fermé'); },
   });
+  const victory = new VictoryBuilder(path.join(dataDir, 'victory'), {
+    logDir: path.join(dataDir, 'logs'), onInstalled: (exe) => settings.update({ victory: exe }), ...builderOptions,
+  });
+  const victoryValid = () => isExe(settings.value.victory);
+  if (!victoryValid() && victory.supported) {
+    const known = victory.installed();
+    // Déjà compilé : on le reprend. Sinon on regarde seulement ce qui manque, rien n'est lancé.
+    if (known) settings.update({ victory: known.exe });
+    else victory.check().catch((e) => console.error('[victory]', e.message));
+  }
+  let lastSeen = Date.now();
   let origin;
 
   const selectedGame = () => settings.value.games.find((g) => g.id === settings.value.target);
@@ -84,7 +96,7 @@ export async function createApp({ dataDir, port = 0, adapterOptions, onQuit = ()
   }, 3000);
 
   const routes = {
-    'GET /api/state': async () => ({ settings: settings.value, session: session.state(), hosts: hosts.list(), lan: await lanAddress(), game: launcher.state(), linkSupported }),
+    'GET /api/state': async () => ({ settings: settings.value, session: session.state(), hosts: hosts.list(), lan: await lanAddress(), game: launcher.state(), linkSupported, victory: { ...victory.state(), valid: victoryValid() } }),
     'POST /api/settings': ({ name, target, victory, games }) => settings.update({
       ...(name !== undefined && { name }), ...(target !== undefined && { target }),
       ...(victory !== undefined && { victory }), ...(games !== undefined && { games }),
@@ -100,6 +112,13 @@ export async function createApp({ dataDir, port = 0, adapterOptions, onQuit = ()
       launcher.launch(settings.value.victory, game);
     },
     'POST /api/game/stop': () => launcher.stop(),
+    'POST /api/victory/check': async () => { await victory.check(); },
+    'POST /api/victory/install': () => { victory.install(); },
+    'POST /api/victory/update': () => { victory.update(); },
+    'POST /api/victory/latest': async () => ({ commit: await victory.latest() }),
+    'POST /api/victory/tool': ({ id }) => { victory.installTool(id); },
+    'POST /api/victory/cancel': () => victory.cancel(),
+    'POST /api/victory/storage': () => openExternal('ms-settings:storagesense'),
     'POST /api/favorite': ({ address, label }) => settings.toggleFavorite(String(address), label),
     'POST /api/query': async ({ address }) => {
       try { return { online: true, ...await queryServer(address) }; } catch { return { online: false }; }
@@ -153,6 +172,7 @@ export async function createApp({ dataDir, port = 0, adapterOptions, onQuit = ()
       }
       if (req.headers.origin !== undefined && req.headers.origin !== origin) throw new HttpError(403, 'origine refusée');
       if (!sameToken(req.headers['x-sixm-token'] ?? '')) throw new HttpError(401, 'session expirée, rouvrez SixM');
+      lastSeen = Date.now();
 
       const key = `${req.method} ${url.pathname}`;
       if (key === 'POST /api/hosts/import') {
@@ -182,9 +202,14 @@ export async function createApp({ dataDir, port = 0, adapterOptions, onQuit = ()
   return {
     origin, token, settings, hosts, session, launcher,
     get link() { return link; },
+    victory,
+    /** Rien en cours et plus aucune fenêtre ouverte depuis `ms`. */
+    idleFor: (ms) => Date.now() - lastSeen > ms && session.status === 'idle' && !victory.busy && !launcher.pid
+      && ![...hosts.running.values()].some((r) => ['starting', 'running'].includes(r.status)),
     url: `${origin}/#${token}`,
     close: async () => {
       clearInterval(attachTimer);
+      await victory.close();
       await session.disconnect();
       await link?.stop();
       await hosts.stopAll();

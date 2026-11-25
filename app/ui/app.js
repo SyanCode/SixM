@@ -26,6 +26,7 @@ const ICONS = {
   down: ['M12 4v11M7.5 10.5L12 15l4.5-4.5M5 20h14'],
   box: ['M12 3l8 4.5v9L12 21l-8-4.5v-9z', 'M4 7.5l8 4.5 8-4.5M12 12v9'],
   back: ['M14 6l-6 6 6 6'],
+  build: ['M14.5 5.5a4.2 4.2 0 00-5.4 5.4L3.5 16.5a2.1 2.1 0 003 3l5.6-5.6a4.2 4.2 0 005.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z'],
   send: ['M4 12l16-7-5 15-3.5-6z'],
 };
 function icon(name) {
@@ -106,6 +107,8 @@ let hostTab = 'console';
 let screen = { key: null, update: () => {} };
 let promptedAttempt = 0; // dernier échec pour lequel le mot de passe a été redemandé
 const statuses = new Map(); // adresse -> fiche
+let laterVictory = false; // carte « Installer VIctory » repoussée pour cette fois
+let lastBuild = null;
 let chosen = null; // destination : { solo: true } ou { address }
 
 async function refresh() {
@@ -148,6 +151,9 @@ function render() {
   for (const b of document.querySelectorAll('nav button'))
     b.dataset.view === view ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current');
 
+  const { status, task } = state.victory;
+  if (lastBuild === 'running' && status === 'done') toast(['install', 'update'].includes(task) ? 'VIctory est installé' : 'Installation terminée');
+  lastBuild = status;
   const idle = view === 'play' && session.status === 'idle';
   $('#dock').hidden = !idle;
   if (idle) updateDock();
@@ -309,7 +315,82 @@ function gameBar() {
   };
 }
 
+const TOOLS = {
+  git: ['Installer Git ?', 'Git télécharge le code de VIctory. Installation avec winget, environ 350 Mo.'],
+  rust: ['Installer Rust ?', 'Rust compile VIctory. Installation avec winget, environ 1 Go.'],
+  msvc: ['Installer les outils C++ de Microsoft ?', 'Visual Studio Build Tools 2022, plusieurs Go. Windows demandera une autorisation d\'administrateur, et l\'installation vaut acceptation de la licence Microsoft.'],
+};
+const short = (sha) => sha.slice(0, 10);
+
+/** Installation de VIctory : prérequis, progression, journal. */
+function victoryPanel({ onLater } = {}) {
+  const head = h('div'), list = h('div', { class: 'needs' }), actions = h('div', { class: 'row' });
+  const step = h('div', { class: 'grow' }), pct = h('span', { class: 'num muted' }), fill = h('i'), meter = h('div', { class: 'meter big' }, fill);
+  const work = h('div', { class: 'form', hidden: true }, h('div', { class: 'row' }, step, pct, btn('Annuler', () => act(() => post('/api/victory/cancel')), 'danger')), meter);
+  const error = h('p', { class: 'note error', hidden: true });
+  const log = h('div', { class: 'console short', role: 'log' }), details = h('details', {}, h('summary', { class: 'small muted' }, 'Journal'), log);
+  const el = h('section', { class: 'card victory' }, head, list, work, error, details, actions);
+
+  const install = async (id) => {
+    const [title, text] = TOOLS[id];
+    if (await ask(title, () => ({ body: [h('p', { class: 'muted' }, text)], submit: 'Installer', value: () => true }))) act(() => post('/api/victory/tool', { id }));
+  };
+  const update = () => act(async () => {
+    const { commit } = await post('/api/victory/latest');
+    const { installed } = state.victory;
+    if (installed?.commit === commit) return toast('VIctory est à jour');
+    const ok = await ask('Mettre à jour VIctory ?', () => ({
+      body: [h('p', { class: 'muted' }, `Nouvelle version : ${short(commit)}${installed ? `, à la place de ${short(installed.commit)}` : ''}. La compilation prend plusieurs minutes. La version actuelle reste en place si elle échoue.`)],
+      submit: 'Compiler', value: () => true,
+    }));
+    if (ok) await post('/api/victory/update');
+  });
+
+  let shape = null;
+  return {
+    el,
+    update() {
+      const { victory: v } = state, running = v.status === 'running';
+      const next = JSON.stringify([v.valid, v.status, v.task, v.checks, v.installed?.commit, v.error]);
+      if (next !== shape) {
+        shape = next;
+        const ready = v.checks?.every((c) => c.ok);
+        head.replaceChildren(h('div', { class: 'srv-top' }, h('div', { class: 'ico' }, icon('build')), h('div', { class: 'grow' },
+          h('h2', {}, v.installed ? 'VIctory' : 'Installer VIctory'),
+          h('p', { class: 'muted small' }, v.installed ? `Version ${short(v.installed.commit)}, compilée le ${new Date(v.installed.builtAt).toLocaleDateString('fr-FR')}`
+            : `SixM télécharge le code public de VIctory (GPL-3, version ${short(v.pinned)}) et le compile sur ce PC. Aucun fichier de jeu n'est fourni.`))));
+        list.hidden = running || (v.valid && ready !== false) || !v.checks;
+        list.replaceChildren(...(v.checks ?? []).map((c) => h('div', { class: 'need' }, h('span', { class: `dot ${c.ok ? 'on' : 'bad'}` }),
+          h('div', { class: 'grow' }, h('strong', {}, c.name), h('span', { class: 'muted small' }, c.detail)),
+          c.ok ? null : c.id === 'disk' ? btn('Libérer de l\'espace', () => act(() => post('/api/victory/storage'))) : btn('Installer', () => install(c.id)))));
+        work.hidden = !running;
+        error.hidden = v.status !== 'failed';
+        error.textContent = cap(v.error ?? '');
+        actions.hidden = running;
+        const again = ['failed', 'cancelled'].includes(v.status) && ['install', 'update'].includes(v.task);
+        actions.replaceChildren(
+          ...(v.installed ? [btn('Mettre à jour', update)] : [btn(again ? 'Réessayer' : 'Installer VIctory', () => act(() => post('/api/victory/install')), 'primary', { disabled: !ready })]),
+          btn('Revérifier', () => act(() => post('/api/victory/check')), 'quiet'),
+          ...(onLater ? [btn('Plus tard', onLater, 'quiet')] : []));
+        if (running) details.open = true;
+      }
+      step.textContent = v.step;
+      pct.textContent = v.progress === null ? '' : `${Math.round(v.progress * 100)} %`;
+      fill.style.width = v.progress === null ? '100%' : `${v.progress * 100}%`;
+      meter.classList.toggle('wait', v.progress === null);
+      const lines = v.log.join('\n');
+      details.hidden = !lines;
+      if (log.textContent !== lines) {
+        const end = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+        log.textContent = lines;
+        if (end) log.scrollTop = log.scrollHeight;
+      }
+    },
+  };
+}
+
 function playScreen() {
+  const setup = victoryPanel({ onLater: () => { laterVictory = true; render(); } });
   const bar = gameBar(), error = h('p', { class: 'note error', hidden: true }), lists = h('div');
   const input = h('input', {
     placeholder: 'Adresse d\'un serveur', 'aria-label': 'Adresse d\'un serveur', autocomplete: 'off', spellcheck: false,
@@ -318,12 +399,14 @@ function playScreen() {
   const el = h('div', {},
     h('div', { class: 'head' }, h('h1', {}, 'Où voulez-vous jouer ?'),
       h('form', { class: 'address', onsubmit: (e) => { e.preventDefault(); go(); } }, icon('link'), input)),
-    error, bar.el, lists);
+    error, setup.el, bar.el, lists);
   let shape = '', cards = [], solo = null;
   return {
     el,
     update() {
-      const { settings, session, hosts } = state;
+      const { settings, session, hosts, victory } = state;
+      setup.el.hidden = !victory.supported || (victory.status !== 'running' && (victory.valid || laterVictory));
+      if (!setup.el.hidden) setup.update();
       bar.update();
       error.hidden = !session.error;
       error.textContent = cap(session.error ?? '');
@@ -700,8 +783,9 @@ function settingsScreen() {
     browse.hidden = !state.linkSupported;
     return { input, el: field(label, h('div', { class: 'join' }, input, browse)) };
   };
+  const build = victoryPanel();
   const section = (title, text, ...body) => h('section', { class: 'card' }, h('header', {}, h('h2', {}, title), text && h('p', { class: 'muted small' }, text)), ...body);
-  const victory = pathRow('Emplacement de victory.exe', settings.victory, 'Choisir victory.exe');
+  const victory = pathRow('victory.exe', settings.victory, 'Choisir victory.exe');
   const games = settings.games.map((g) => ({ ...g }));
   const rows = h('div', { class: 'form' });
   let inputs = [];
@@ -741,10 +825,12 @@ function settingsScreen() {
       section('Profil', null, field('Pseudo', name)),
       section('Jeux', 'Le dossier extrait de votre propre disque. SixM y trouve le programme du jeu et ne modifie rien.', rows,
         h('div', {}, btn('Ajouter un jeu', () => draw([...collect(), { name: '', path: '', console: 'series-x' }])))),
-      section('VIctory', 'SixM lance le VIctory installé sur ce PC. Il ne le fournit pas.', victory.el),
+      section('Emplacement de VIctory', 'Rempli tout seul après l\'installation. Vous pouvez aussi indiquer le vôtre.', victory.el),
       h('div', { class: 'save' }, h('button', { class: 'btn primary' }, 'Enregistrer'))),
+      state.victory.supported && build.el,
       section('Fermer SixM', 'Quitte le serveur en cours et arrête ceux hébergés sur ce PC. Le jeu reste ouvert.',
         h('div', {}, btn('Fermer SixM', () => act(() => post('/api/quit')), 'danger')))),
+    update: () => build.update(),
   };
 }
 

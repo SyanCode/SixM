@@ -1,16 +1,19 @@
 {
   "name": "sixm",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "SixM - framework multijoueur/modding moddable et agnostique du jeu, pensé pour GTA VI PC (portages inclus)",
   "type": "module",
-  "bin": { "sixm": "bin/sixm.js" },
+  "bin": {
+    "sixm": "bin/sixm.js"
+  },
   "license": "MIT",
   "scripts": {
     "app": "node bin/sixm.js",
     "start": "node server/index.js",
     "bot": "node client/bot.js",
     "sim-bridge": "node integrations/victory/sim-bridge.js",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "package": "node packaging/build.mjs"
   },
   "dependencies": {
     "quickjs-emscripten": "^0.32.0",
@@ -18,5 +21,6 @@
   },
   "engines": {
     "node": ">=20.15"
-  }
+  },
+  "private": true
 }

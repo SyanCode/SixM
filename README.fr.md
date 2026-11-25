@@ -4,7 +4,7 @@
 
 Framework multijoueur / modding **agnostique du jeu**, dans l'esprit de FiveM, pensé pour GTA VI sur PC et les projets de portage. Tout le code est original.
 
-## État (v0.1)
+## État (v0.2)
 
 | Brique | Statut |
 |---|---|
@@ -13,6 +13,7 @@ Framework multijoueur / modding **agnostique du jeu**, dans l'esprit de FiveM, p
 | API de script (`sixm.on`, `onNet`, `emitClient`, `emitAllClients`, `getPlayers`, `kick`) | ✅ |
 | Hébergement (`sixm init` / `start`, mot de passe, bans, console, `info.json`) | ✅ |
 | Launcher VIctory et surcouche en jeu (Windows) : chat, joueurs, radar | ✅ testé avec un faux VIctory |
+| Installation et compilation de VIctory depuis l'interface (commit épinglé, mise à jour manuelle) | ✅ |
 | Position et personnages des autres joueurs dans le jeu | ⛔ demande un module dans VIctory |
 | Interface client : jouer, héberger, mods, serveur à télécharger | ✅ |
 | Scripts client isolés dans QuickJS/WebAssembly | ✅ |
@@ -21,7 +22,7 @@ Framework multijoueur / modding **agnostique du jeu**, dans l'esprit de FiveM, p
 
 ## Démarrage
 
-Windows : double-cliquez sur `SixM.bat` ([Node.js](https://nodejs.org) requis). Ailleurs : `npm install` puis `npm run app`.
+Windows : téléchargez `SixM-Setup` dans les [versions](https://github.com/SyanCode/SixM/releases) (Node.js inclus, sans droits d'administrateur). Le programme n'est pas signé : SmartScreen peut avertir. Depuis le code : `SixM.bat` ([Node.js](https://nodejs.org) requis). Ailleurs : `npm install` puis `npm run app`.
 
 - **Jouer** : choisissez l'installation du jeu et le serveur ; SixM lance [VIctory](https://github.com/Marvisak/VIctory) puis ajoute chat et joueurs par-dessus (F8 écrire, F9 masquer). Mode démo sans jeu.
 - **Réglages** : chemin de `victory.exe` et dossier du jeu extrait de votre disque. SixM ne fournit ni VIctory ni le jeu.
