@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const DEFAULTS = { name: 'Joueur', target: 'demo', victory: '', games: [], favorites: [], recents: [] };
+const DEFAULTS = { name: 'Joueur', autoUpdate: true, target: 'demo', victory: '', games: [], favorites: [], recents: [] };
 const clean = (v, max) => String(v).replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim().slice(0, max);
 
 function normalize(raw) {
@@ -16,6 +16,7 @@ function normalize(raw) {
   }));
   return {
     name: clean(s.name ?? '', 24) || DEFAULTS.name,
+    autoUpdate: s.autoUpdate !== false,
     // 'demo' : sans jeu ; 'attach' : VIctory déjà ouvert ; sinon l'installation à lancer.
     target: ['demo', 'attach', ...games.map((g) => g.id)].includes(s.target) ? s.target : DEFAULTS.target,
     victory: clean(s.victory ?? '', 1024),

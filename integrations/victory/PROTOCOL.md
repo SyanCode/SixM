@@ -4,8 +4,24 @@
 - **SixM Link** (`link/SixMLink.cs`, Windows) : programme à part, sans modification de VIctory ni lecture de la
   mémoire du jeu. Surcouche (chat, joueurs, radar), F8 pour écrire, F9 pour masquer. Il ne connaît pas la position
   du joueur et ne crée pas de personnages. SixM le compile et le lance tout seul.
-- **Module dans VIctory** : reste à écrire. VIctory n'a pas d'API de plugin à ce jour. Si un tel module écoute déjà
-  sur le port, SixM l'utilise à la place de SixM Link.
+- **Module dans VIctory** (`sixm-bridge/`, Rust, MIT) : SixM l'ajoute en compilant VIctory. Il donne la position du
+  joueur et la caméra, lues sans rien écrire, à l'endroit indiqué par un **profil local** de la version du jeu. SixM
+  n'en fournit aucun. Il ne crée pas encore de personnages : SixM Link affiche les noms à leur place dans le monde.
+
+### Profil
+Fichier `~/SixM/profiles/<build>.profile` ; l'interface affiche le `<build>` de votre jeu une fois lancé.
+```text
+build    = 6912ab34-1a2b000      # TimeDateStamp-SizeOfImage de l'image
+position = 0x1000, 0x20, 0x90    # trois f32 : x, y, z
+heading  = 0x1000, 0x20, 0xa0    # un f32 en radians (facultatif)
+camera   = 0x2000, 0x0           # seize f32 : matrice vue-projection (facultatif)
+camera_order = row               # row ou column
+```
+`a` se lit à `base + a` ; `a, b, c` à `[[base + a] + b] + c`. Le fichier est relu pendant la partie.
+
+### Module → SixM
+Connexion sur `127.0.0.1:SIXM_BRIDGE_PORT`, première ligne : `SIXM_BRIDGE_TOKEN`. Puis `ready` (`build`, `profile`,
+`error`), `localPlayer`, `camera` (`m` : 16 nombres par lignes, `clip = m * (x, y, z, 1)`), `tick`.
 
 ## Principe
 Le bridge s'exécute dans le processus VIctory, écoute en TCP **127.0.0.1:30121** (loopback
@@ -20,6 +36,7 @@ connecte comme client. Le bridge lit/écrit l'état du jeu ; le serveur SixM ne 
 - `{"t":"chat","text"}` — message écrit par le joueur depuis le jeu.
 
 ## Adaptateur → bridge
+- `{"t":"view","m":[16],"x","y","z"}` — caméra du jeu et position locale, pour placer les noms.
 - `{"t":"target","pid"}` — processus du jeu, `0` = aucun.
 - `{"t":"roster","server","players":["nom"]}` — serveur et tous les joueurs, même sans position.
 - `{"t":"setRemote","id","name","x","y","z","h"}` — créer/déplacer l'avatar d'un joueur distant.

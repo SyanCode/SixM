@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createApp } from './server.js';
+import { RESTART_CODE } from './updater.js';
 import { openWindow } from './window.js';
 
 const IDLE_MS = 3 * 60000;
@@ -33,14 +34,14 @@ export async function runApp({ open = true } = {}) {
   }
 
   let stopping = false;
-  const quit = async () => {
+  const quit = async (code = 0) => {
     if (stopping) return;
     stopping = true;
     try { if (JSON.parse(fs.readFileSync(lock, 'utf8')).pid === process.pid) fs.rmSync(lock); } catch { /* déjà retiré */ }
     await app.close();
-    process.exit(0);
+    process.exit(typeof code === 'number' ? code : 0); // un signal passe son nom
   };
-  const app = await createApp({ dataDir: dir, port: Number(process.env.SIXM_UI_PORT ?? 0), onQuit: quit });
+  const app = await createApp({ dataDir: dir, port: Number(process.env.SIXM_UI_PORT ?? 0), autoUpdate: !process.env.SIXM_NO_UPDATE, onQuit: quit, onRestart: () => quit(RESTART_CODE) });
   fs.mkdirSync(dir, { recursive: true });
   // Contient le jeton de session : lisible par l'utilisateur seulement.
   fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, url: app.url }), { mode: 0o600 });

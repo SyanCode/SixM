@@ -6,10 +6,12 @@ app/server.js             interface locale : API sur 127.0.0.1, jeton par sessio
 app/ui/                   pages de l'interface (sans dépendance)
 app/session.js, hosts.js  partie en cours ; serveurs hébergés
 app/builder.js            télécharge et compile VIctory (git, cargo), sans code de VIctory ici
+app/updater.js            mise à jour de SixM depuis GitHub
 app/launcher.js           lance VIctory sur l'installation choisie
 app/mods.js, pack.js      import de mods ; serveur téléchargeable (zip.js)
 bin/sixm.js               CLI : app, init, start, pack, info, connect
 server/scaffold.js        création d'un dossier de serveur
+client/module.js          client du module SixM dans VIctory
 client/link.js            compile et lance SixM Link
 link/SixMLink.cs          bridge et surcouche sur VIctory (Windows)
 client/address.js         adresses et fiche d'un serveur
@@ -31,6 +33,11 @@ client/adapters/mock.js   adaptateur de test
 `app/builder.js` clone le dépôt public dans `~/SixM/victory/src` au commit `PINNED` et lance
 `cargo build --release -p victory --locked`. Le résultat n'est adopté qu'après vérification (`victory.exe --help`) ;
 une version par commit dans `builds/`, avec sa licence GPL-3. Rien ne se lance sans clic.
+
+## Mises à jour
+Au lancement puis toutes les 30 min, si rien ne tourne. Installé : dernier `SixM-Setup` publié, dont l'empreinte doit
+être celle annoncée par GitHub. Code source : `git merge --ff-only` de `main`, si rien n'est modifié. Portable : signale
+seulement. Si le module de VIctory a changé, la même version de VIctory est recompilée une fois. Réglage : `autoUpdate`.
 
 ## Publier une version
 Changez `version` dans `package.json` puis poussez sur `main` : `.github/workflows/release.yml` teste, fabrique

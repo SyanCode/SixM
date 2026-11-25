@@ -160,7 +160,7 @@ test('SixM Link : protocole, un seul client, entrées hostiles, arrêt avec SixM
     { t: 'target', pid: -1 }, { t: 'target', pid: 'x' }, { t: 'inconnu' }, {},
   ]) c.s.write(JSON.stringify(m) + '\n');
   const png = path.join(tmp(), 'o.png');
-  assert.equal(await link.dump(png), 'dumped visible=0 target=0');
+  assert.equal(await link.dump(png), 'dumped visible=0 target=0 markers=0');
   assert.ok(fs.statSync(png).size > 500);
   assert.equal(c.closed, false);
 

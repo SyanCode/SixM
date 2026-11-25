@@ -1,4 +1,6 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 
@@ -59,7 +61,9 @@ export function findVictory(victory) {
  * et ne modifie ni VIctory ni le jeu : il ne connaît que leurs chemins.
  */
 export class Launcher {
-  constructor(dir, { onExit = () => {} } = {}) {
+  constructor(dir, { onExit = () => {}, profiles = path.join(dir, 'profiles') } = {}) {
+    this.profiles = profiles;
+    this.bridge = null; // { port, token } du module SixM dans VIctory
     this.logFile = path.join(dir, 'victory.log');
     this.onExit = onExit;
     this.status = 'stopped'; // stopped | running | failed
@@ -76,6 +80,15 @@ export class Launcher {
     return resolveGame(game.path);
   }
 
+  /** Port libre et jeton pour le module de la prochaine partie. */
+  async prepare() {
+    const port = await new Promise((resolve, reject) => {
+      const s = net.createServer().once('error', reject).listen(0, '127.0.0.1', () => { const { port: p } = s.address(); s.close(() => resolve(p)); });
+    });
+    fs.mkdirSync(this.profiles, { recursive: true });
+    if (this.status !== 'running') this.bridge = { port, token: crypto.randomBytes(24).toString('hex') };
+  }
+
   launch(victory, game) {
     if (this.status === 'running') throw new Error('VIctory est déjà lancé');
     const exe = this.check(victory, game);
@@ -87,6 +100,8 @@ export class Launcher {
       // Journal dans un fichier, pas un tube : VIctory ne dépend plus de SixM une fois lancé.
       child = spawn(victory, ['run', exe, '--execute', '--console', game.console], {
         cwd: workingDir(victory), detached: true, stdio: ['ignore', log, log],
+        // Lu par le module SixM s'il est compilé dans VIctory ; sans effet sinon.
+        env: { ...process.env, ...(this.bridge && { SIXM_BRIDGE_PORT: String(this.bridge.port), SIXM_BRIDGE_TOKEN: this.bridge.token, SIXM_PROFILES: this.profiles }) },
       });
     } catch (e) {
       throw new Error(`VIctory ne démarre pas : ${e.message}`);

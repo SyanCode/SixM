@@ -5,7 +5,7 @@ $setup = (Get-ChildItem "$PSScriptRoot\..\dist\SixM-Setup-*.exe" | Select-Object
 $base = Join-Path ([IO.Path]::GetTempPath()) ("sixm-setup-" + [Guid]::NewGuid().ToString('N'))
 $dir = Join-Path $base 'Programmes été\SixM'
 $env:SIXM_HOME = Join-Path $base 'data'
-$env:SIXM_NO_WINDOW = '1'
+$env:SIXM_NO_WINDOW = '1'; $env:SIXM_NO_UPDATE = '1'
 function Check($ok, $what) { if (-not $ok) { throw "ECHEC : $what" } else { "ok  $what" } }
 function Setup { $p = Start-Process $setup -ArgumentList (@('--silent', '--no-shortcuts', '--no-launch', '--dir', "`"$dir`"") + $args) -Wait -PassThru; $p.ExitCode }
 

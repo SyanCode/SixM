@@ -33,13 +33,25 @@ else if (cmd[0] === 'fetch') {
   if (mode === 'fail') { console.error('fatal: unable to access'); process.exit(128); }
   process.stderr.write('Receiving objects:  50% (1/2)\\rReceiving objects: 100% (2/2), done.\\n');
   fs.writeFileSync('.git/HEAD', cmd.at(-1));
-} else if (cmd[0] === 'checkout') fs.writeFileSync('LICENSE', 'GPL-3');
+} else if (cmd[0] === 'checkout') {
+  fs.mkdirSync('apps/victory/src', { recursive: true });
+  fs.writeFileSync('LICENSE', 'GPL-3');
+  fs.writeFileSync('Cargo.lock', '[[package]]\\nname = "a"\\nversion = "1.0.0"\\nchecksum = "x"\\n');
+  fs.writeFileSync('apps/victory/Cargo.toml', '[package]\\nname = "victory"\\n\\n[dependencies]\\nanyhow = "1"\\n');
+  fs.writeFileSync('apps/victory/src/main.rs', mode === 'nomain' ? 'fn other() {}' : 'fn main() -> Result<()> {\\n    run();\\n}\\n');
+}
 else if (cmd[0] === 'rev-parse') console.log(mode === 'wrong' ? 'c'.repeat(40) : fs.readFileSync('.git/HEAD', 'utf8'));
 `;
 const CARGO = `
 const fs = require('fs'), path = require('path'), cp = require('child_process');
 const args = process.argv.slice(2);
 if (args[0] === '--version') { console.log('cargo 9.9'); process.exit(); }
+if (args[0] === 'fetch') process.exit();
+if (args[0] === 'update') {
+  const m = fs.readFileSync(process.env.FAKE + '/cargo.mode', 'utf8');
+  fs.appendFileSync('Cargo.lock', '[[package]]\\nname = "sixm-bridge"\\nversion = "0.1.0"\\n' + (m === 'drift' ? '[[package]]\\nname = "evil"\\nversion = "9.9.9"\\n' : ''));
+  process.exit();
+}
 const F = process.env.FAKE, mode = fs.readFileSync(F + '/cargo.mode', 'utf8');
 fs.writeFileSync(F + '/cargo.json', JSON.stringify({ args, cwd: process.cwd(), target: process.env.CARGO_TARGET_DIR, toolchain: process.env.RUSTUP_TOOLCHAIN }));
 process.stderr.write('   \\u001b[32mCompiling\\u001b[0m victory v0.1.0\\n');
@@ -109,10 +121,15 @@ test('installation : clone épinglé, cargo --locked, chemin renseigné, sans re
   clearInterval(timer);
   delete process.env.RUSTUP_TOOLCHAIN;
   assert.deepEqual([b.status, b.error], ['done', null]);
-  const out = path.join(dir, 'builds', A.slice(0, 12), 'victory.exe');
+  const out = path.join(dir, 'builds', `${A.slice(0, 12)}-${b.module.id.slice(0, 6)}`, 'victory.exe');
   assert.deepEqual(done, [out]);
   assert.equal(b.installed().commit, A);
   assert.ok(fs.existsSync(path.join(path.dirname(out), 'LICENSE')), 'la licence accompagne le binaire');
+  const src = (f) => fs.readFileSync(path.join(dir, 'src', f), 'utf8');
+  assert.match(src('apps/victory/Cargo.toml'), /\[dependencies\]\nsixm-bridge = /);
+  assert.match(src('apps/victory/src/main.rs'), /fn main\(\) -> Result<\(\)> \{\n {4}sixm_bridge::start\(\);\n {4}run/);
+  assert.ok(src('crates/sixm-bridge/src/lib.rs').includes('pub fn start()'));
+  assert.equal(b.moduleStale(), false);
   const cargo = read('cargo.json');
   assert.deepEqual(cargo.args, ['build', '--release', '-p', 'victory', '--locked']);
   assert.equal(cargo.cwd, path.join(dir, 'src'));
@@ -143,6 +160,14 @@ test('une compilation ratée ne remplace pas le VIctory qui marche', { skip }, a
     assert.deepEqual(b.installed(), good, mode);
     assert.ok(isExe(good.exe));
   }
+  put('cargo.mode', 'drift');
+  await b.update();
+  assert.match(b.error, /dépendances de VIctory ont bougé/);
+  put('cargo.mode', '');
+  put('git.mode', 'nomain');
+  await b.update();
+  assert.match(b.error, /main\.rs ne se laisse plus compléter/);
+  assert.deepEqual(b.installed(), good);
   for (const mode of ['fail', 'wrong']) {
     put('git.mode', mode);
     await b.update();
@@ -260,4 +285,22 @@ test('application : rien ne se lance seul, installation, mise à jour manuelle, 
   await until(async () => (await v()).step === 'Compilation', 'seconde compilation');
   await app.close(); // fermer SixM arrête la compilation
   assert.equal(app.victory.status, 'cancelled');
+});
+
+test('module changé : recompilation de la même version, un seul essai automatique', { skip }, async () => {
+  const { b, dir, put } = setup();
+  await b.install();
+  assert.equal(b.autoRebuild(), false, 'rien à faire');
+  b.module = { ...b.module, id: 'f'.repeat(12) };
+  assert.equal(b.moduleStale(), true);
+  put('cargo.mode', 'fail');
+  assert.equal(b.autoRebuild(), true);
+  await b.running;
+  assert.deepEqual([b.status, b.task, b.moduleStale()], ['failed', 'rebuild', true]);
+  assert.equal(b.autoRebuild(), false, 'pas d\'essai à chaque lancement');
+  put('cargo.mode', '');
+  await b.rebuild();
+  assert.deepEqual([b.status, b.installed().commit, b.moduleStale()], ['done', A, false]);
+  assert.ok(b.installed().exe.includes('-ffffff'));
+  assert.ok(b.installed().exe.startsWith(path.join(dir, 'builds')));
 });

@@ -78,6 +78,7 @@ const files = [
   { name: 'node/LICENSE', data: await download(`https://raw.githubusercontent.com/nodejs/node/v${runtime.version}/LICENSE`) },
   ...['package.json', 'server.json'].map((f) => ({ name: `app/${f}`, data: fs.readFileSync(path.join(root, f)) })),
   ...['app', 'bin', 'client', 'link', 'resources', 'server'].flatMap((d) => walk(path.join(root, d), `app/${d}`, [])),
+  ...walk(path.join(root, 'integrations'), 'app/integrations', [], (n) => n === 'target' || n === 'Cargo.lock'),
   ...dependencies(),
 ];
 const payload = createZip(files);

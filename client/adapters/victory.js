@@ -28,6 +28,7 @@ export class VictoryAdapter extends GameAdapter {
     this.remotes = new Map();
     this.roster = null;
     this.pid = 0;
+    this.module = null;
     this.closing = false;
   }
 
@@ -106,11 +107,20 @@ export class VictoryAdapter extends GameAdapter {
 
   #send(m) {
     // Un bridge figé ne doit pas faire grossir la mémoire : on saute des positions, pas le reste.
-    if (m.t === 'setRemote' && this.sock?.writableLength > MAX_LINE) return;
+    if ((m.t === 'setRemote' || m.t === 'view') && this.sock?.writableLength > MAX_LINE) return;
     this.sock?.write(JSON.stringify(m) + '\n');
   }
 
-  getLocalPlayerPosition() { return this.pos; }
+  /** Module SixM dans VIctory : il connaît la position et la caméra, le bridge affiche. */
+  useModule(module) {
+    this.module = module;
+    module.onCamera = (m) => {
+      const p = module.position;
+      this.#send({ t: 'view', m, ...(p && { x: p.x, y: p.y, z: p.z }) });
+    };
+  }
+
+  getLocalPlayerPosition() { return this.module?.position ?? this.pos; }
   setRemotePlayer(id, name, pos) {
     this.remotes.set(id, { name, pos });
     this.#send({ t: 'setRemote', id, name, ...pos });
@@ -130,5 +140,5 @@ export class VictoryAdapter extends GameAdapter {
     this.#send({ t: 'target', pid });
   }
   log(text) { this.logs.push(text); this.#send({ t: 'log', text }); console.log(`[game] ${text}`); }
-  async shutdown() { this.closing = true; (this.sock ?? this.pending)?.end(); }
+  async shutdown() { this.closing = true; this.module?.stop(); (this.sock ?? this.pending)?.end(); }
 }

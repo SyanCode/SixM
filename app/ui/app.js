@@ -111,13 +111,15 @@ let laterVictory = false; // carte « Installer VIctory » repoussée pour cette
 let lastBuild = null;
 let chosen = null; // destination : { solo: true } ou { address }
 
+let restarting = false; // mise à jour : cette fenêtre laisse la place à la suivante
 async function refresh() {
   try {
     state = await (await request('/api/state')).json();
   } catch (e) {
     $('#dock').hidden = true;
+    if (restarting) window.close();
     if (screen.key !== 'offline') show('offline', () => ({
-      el: h('div', { class: 'center' }, h('h1', {}, e.offline ? 'SixM est fermé' : 'Session expirée'), h('p', { class: 'muted' }, e.message)),
+      el: h('div', { class: 'center' }, h('h1', {}, restarting ? 'SixM se met à jour' : e.offline ? 'SixM est fermé' : 'Session expirée'), h('p', { class: 'muted' }, restarting ? 'Une nouvelle fenêtre va s\'ouvrir.' : e.message)),
     }));
     return;
   }
@@ -142,6 +144,7 @@ function show(key, build) {
 
 function render() {
   const { session, settings, hosts } = state;
+  if (state.update.status === 'restarting') restarting = true;
   if ($('#me').dataset.name !== settings.name) {
     $('#me').dataset.name = settings.name;
     $('#me').replaceChildren(h('span', {}, settings.name), avatar(settings.name, 'mine'));
@@ -152,7 +155,7 @@ function render() {
     b.dataset.view === view ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current');
 
   const { status, task } = state.victory;
-  if (lastBuild === 'running' && status === 'done') toast(['install', 'update'].includes(task) ? 'VIctory est installé' : 'Installation terminée');
+  if (lastBuild === 'running' && status === 'done') toast(['install', 'update', 'rebuild'].includes(task) ? 'VIctory est installé' : 'Installation terminée');
   lastBuild = status;
   const idle = view === 'play' && session.status === 'idle';
   $('#dock').hidden = !idle;
@@ -351,13 +354,13 @@ function victoryPanel({ onLater } = {}) {
     el,
     update() {
       const { victory: v } = state, running = v.status === 'running';
-      const next = JSON.stringify([v.valid, v.status, v.task, v.checks, v.installed?.commit, v.error]);
+      const next = JSON.stringify([v.valid, v.moduleStale, v.status, v.task, v.checks, v.installed?.commit, v.error]);
       if (next !== shape) {
         shape = next;
         const ready = v.checks?.every((c) => c.ok);
         head.replaceChildren(h('div', { class: 'srv-top' }, h('div', { class: 'ico' }, icon('build')), h('div', { class: 'grow' },
           h('h2', {}, v.installed ? 'VIctory' : 'Installer VIctory'),
-          h('p', { class: 'muted small' }, v.installed ? `Version ${short(v.installed.commit)}, compilée le ${new Date(v.installed.builtAt).toLocaleDateString('fr-FR')}`
+          h('p', { class: 'muted small' }, v.installed ? `Version ${short(v.installed.commit)}, compilée le ${new Date(v.installed.builtAt).toLocaleDateString('fr-FR')}. ${v.moduleStale ? 'Le module multijoueur a changé : recompilez pour l\'avoir.' : 'Module multijoueur inclus.'}`
             : `SixM télécharge le code public de VIctory (GPL-3, version ${short(v.pinned)}) et le compile sur ce PC. Aucun fichier de jeu n'est fourni.`))));
         list.hidden = running || (v.valid && ready !== false) || !v.checks;
         list.replaceChildren(...(v.checks ?? []).map((c) => h('div', { class: 'need' }, h('span', { class: `dot ${c.ok ? 'on' : 'bad'}` }),
@@ -367,8 +370,9 @@ function victoryPanel({ onLater } = {}) {
         error.hidden = v.status !== 'failed';
         error.textContent = cap(v.error ?? '');
         actions.hidden = running;
-        const again = ['failed', 'cancelled'].includes(v.status) && ['install', 'update'].includes(v.task);
+        const again = ['failed', 'cancelled'].includes(v.status) && ['install', 'update', 'rebuild'].includes(v.task);
         actions.replaceChildren(
+          ...(v.installed && v.moduleStale ? [btn('Recompiler', () => act(() => post('/api/victory/rebuild')), 'primary', { disabled: ready === false })] : []),
           ...(v.installed ? [btn('Mettre à jour', update)] : [btn(again ? 'Réessayer' : 'Installer VIctory', () => act(() => post('/api/victory/install')), 'primary', { disabled: !ready })]),
           btn('Revérifier', () => act(() => post('/api/victory/check')), 'quiet'),
           ...(onLater ? [btn('Plus tard', onLater, 'quiet')] : []));
@@ -508,7 +512,8 @@ function sessionScreen() {
   const log = h('div', { class: 'chat-log', role: 'log', 'aria-live': 'polite' });
   const input = h('input', { placeholder: 'Écrire un message', 'aria-label': 'Message', maxLength: 200, autocomplete: 'off' });
   const players = h('div', { class: 'list' }), count = h('h2'), bar = gameBar();
-  const hint = h('p', { class: 'note', hidden: true });
+  const hintText = h('div', { class: 'grow' }), profiles = btn('Ouvrir les profils', () => act(() => post('/api/profiles')));
+  const hint = h('div', { class: 'note row', hidden: true }, hintText, profiles);
   const radar = h('canvas', { class: 'radar', role: 'img', 'aria-label': 'Position des autres joueurs autour de vous' });
   /** « Nom: texte » d'un joueur présent devient une bulle ; le reste est un message du serveur. */
   const line = (text) => {
@@ -535,7 +540,15 @@ function sessionScreen() {
       const { session: s, settings } = state;
       bar.update();
       hint.hidden = s.adapter !== 'victory';
-      hint.textContent = `Dans le jeu : F8 pour écrire, F9 pour masquer.${s.local ? '' : ' Votre position n\'est pas lue dans le jeu : les autres voient votre nom et vos messages, pas votre personnage.'}`;
+      const m = s.module;
+      const why = s.local ? 'Votre position est partagée : les noms des autres joueurs s\'affichent dans le jeu.'
+        : !m?.connected ? 'Le module multijoueur ne répond pas encore : chat et liste des joueurs seulement.'
+          : m.error ? `Profil du jeu refusé : ${m.error}`
+            : !m.build ? 'En attente du jeu.'
+              : m.profile ? 'Profil trouvé, position pas encore lisible.'
+                : `Aucun profil pour cette version du jeu (${m.build}) : chat et liste des joueurs seulement.`;
+      hintText.textContent = `F8 pour écrire, F9 pour masquer. ${why}`;
+      profiles.hidden = !m?.build || (m.profile && !m.error);
       const server = s.serverName || s.address;
       if (title.textContent !== server) { title.textContent = server; face.replaceChildren(avatar(server, 'big')); }
       sub.textContent = `${s.address} · ${s.adapter === 'victory' ? 'VIctory' : 'Démo, sans jeu'}`;
@@ -784,6 +797,19 @@ function settingsScreen() {
     return { input, el: field(label, h('div', { class: 'join' }, input, browse)) };
   };
   const build = victoryPanel();
+  const auto = h('input', { type: 'checkbox', class: 'switch', role: 'switch', checked: settings.autoUpdate });
+  const upText = h('p', { class: 'muted small' });
+  const upCheck = btn('Vérifier', () => act(() => post('/api/update/check'))), upApply = btn('Installer et redémarrer', () => act(() => post('/api/update/apply')), 'primary');
+  const updateInfo = () => {
+    const { update: u } = state;
+    const busy = ['checking', 'downloading', 'restarting'].includes(u.status);
+    upText.textContent = `Version ${u.version}. ${{
+      idle: '', current: 'À jour.', checking: 'Recherche…', downloading: 'Mise à jour en cours…', restarting: 'Redémarrage…', failed: cap(u.error ?? ''),
+      available: u.mode === 'portable' ? `La version ${u.latest} est sur GitHub : remplacez votre dossier portable.` : `Version ${u.latest} disponible.`,
+    }[u.status]}`;
+    upCheck.disabled = busy;
+    upApply.hidden = u.status !== 'available' || !['installed', 'source'].includes(u.mode);
+  };
   const section = (title, text, ...body) => h('section', { class: 'card' }, h('header', {}, h('h2', {}, title), text && h('p', { class: 'muted small' }, text)), ...body);
   const victory = pathRow('victory.exe', settings.victory, 'Choisir victory.exe');
   const games = settings.games.map((g) => ({ ...g }));
@@ -812,7 +838,7 @@ function settingsScreen() {
           const unquote = (p) => p.trim().replace(/^"|"$/g, '');
           const list = collect().map((g) => ({ ...g, path: unquote(g.path) }));
           const known = new Set(state.settings.games.map((g) => g.id));
-          if (!await act(() => post('/api/settings', { name: name.value, victory: unquote(victory.input.value), games: list }))) return;
+          if (!await act(() => post('/api/settings', { name: name.value, autoUpdate: auto.checked, victory: unquote(victory.input.value), games: list }))) return;
           // Un jeu tout juste ajouté devient le jeu choisi.
           const added = state.settings.games.find((g) => !known.has(g.id));
           if (added) await act(() => post('/api/settings', { target: added.id }));
@@ -823,6 +849,8 @@ function settingsScreen() {
         },
       },
       section('Profil', null, field('Pseudo', name)),
+      section('Mises à jour', 'Au lancement, depuis GitHub. Jamais pendant une partie.', h('label', { class: 'row' }, auto, 'Mettre SixM à jour automatiquement'), upText,
+        h('div', { class: 'row' }, upCheck, upApply)),
       section('Jeux', 'Le dossier extrait de votre propre disque. SixM y trouve le programme du jeu et ne modifie rien.', rows,
         h('div', {}, btn('Ajouter un jeu', () => draw([...collect(), { name: '', path: '', console: 'series-x' }])))),
       section('Emplacement de VIctory', 'Rempli tout seul après l\'installation. Vous pouvez aussi indiquer le vôtre.', victory.el),
@@ -830,7 +858,7 @@ function settingsScreen() {
       state.victory.supported && build.el,
       section('Fermer SixM', 'Quitte le serveur en cours et arrête ceux hébergés sur ce PC. Le jeu reste ouvert.',
         h('div', {}, btn('Fermer SixM', () => act(() => post('/api/quit')), 'danger')))),
-    update: () => build.update(),
+    update: () => { build.update(); updateInfo(); },
   };
 }
 

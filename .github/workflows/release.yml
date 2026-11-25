@@ -38,6 +38,8 @@ jobs:
           node-version: 24
       - run: npm ci --ignore-scripts
       - run: npm test
+      - name: Tests du module VIctory
+        run: cargo test --manifest-path integrations/victory/sixm-bridge/Cargo.toml
       - run: npm run package
       - name: Essai de l'installateur
         shell: powershell

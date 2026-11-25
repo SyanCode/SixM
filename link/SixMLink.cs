@@ -92,7 +92,7 @@ static class Program
     }
 }
 
-sealed class Remote { public string Name; public double X, Y; }
+sealed class Remote { public string Name; public double X, Y, Z; }
 sealed class Line { public string Text; public DateTime At; }
 
 /// Serveur NDJSON local, un seul client à la fois.
@@ -105,6 +105,10 @@ sealed class Bridge
     public readonly List<Line> Lines = new List<Line>();
     public string Server = "";
     public int TargetPid;
+    public double[] View; // clip = m * (x, y, z, 1), par lignes
+    public DateTime ViewAt;
+    public bool HasSelf;
+    public double SelfX, SelfY, SelfZ;
     public int Version; // change à chaque modification visible
 
     readonly JavaScriptSerializer json = new JavaScriptSerializer();
@@ -180,7 +184,7 @@ sealed class Bridge
     void Clear()
     {
         Remotes.Clear(); Players.Clear(); Lines.Clear();
-        Server = ""; TargetPid = 0; Version++;
+        Server = ""; TargetPid = 0; View = null; HasSelf = false; Version++;
     }
 
     bool Handle(Dictionary<string, object> m)
@@ -193,7 +197,7 @@ sealed class Bridge
                     if (Remotes.Count >= 1024 && !Remotes.ContainsKey(id)) return false;
                     Remote r = new Remote();
                     r.Name = Str(m, "name", 24);
-                    r.X = Num(m, "x"); r.Y = Num(m, "y");
+                    r.X = Num(m, "x"); r.Y = Num(m, "y"); r.Z = Num(m, "z");
                     Remotes[id] = r;
                     return true;
                 }
@@ -217,6 +221,23 @@ sealed class Bridge
                         foreach (object o in items)
                             if (o is string && Players.Count < 1024) Players.Add(Clean((string)o, 24));
                     return true;
+                }
+            case "view":
+                {
+                    object raw;
+                    System.Collections.IList list = m.TryGetValue("m", out raw) ? raw as System.Collections.IList : null;
+                    if (list == null || list.Count != 16) return false;
+                    double[] v = new double[16];
+                    for (int i = 0; i < 16; i++)
+                    {
+                        if (!(list[i] is int || list[i] is decimal || list[i] is double || list[i] is long)) return false;
+                        v[i] = Convert.ToDouble(list[i]);
+                    }
+                    View = v;
+                    ViewAt = DateTime.UtcNow;
+                    HasSelf = m.ContainsKey("x") && m.ContainsKey("y") && m.ContainsKey("z");
+                    SelfX = Num(m, "x"); SelfY = Num(m, "y"); SelfZ = Num(m, "z");
+                    return false; // redessiné par Markers, pas par le panneau
                 }
             case "target": TargetPid = (int)Num(m, "pid"); return true;
             default: return false;
@@ -269,6 +290,7 @@ sealed class Overlay : Form
     const int ChatKey = 1, HideKey = 2, PanelWidth = 360, PanelHeight = 460;
     readonly Bridge bridge;
     readonly ChatBox chat;
+    readonly Markers markers;
     readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
     readonly Font font = new Font("Segoe UI", 10.5f), bold = new Font("Segoe UI Semibold", 10.5f), small = new Font("Segoe UI", 8.5f);
     IntPtr target;
@@ -280,6 +302,7 @@ sealed class Overlay : Form
     {
         bridge = b;
         chat = new ChatBox(b);
+        markers = new Markers(b);
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         timer.Interval = 100;
@@ -318,6 +341,7 @@ sealed class Overlay : Form
         // Pendant une bascule de focus, Windows n'a aucune fenêtre active : on garde l'état.
         if (front == IntPtr.Zero && target != IntPtr.Zero) return;
         bool inGame = target != IntPtr.Zero && !Native.IsIconic(target) && (front == target || (chat.Visible && Native.IsOurs(front)));
+        markers.Follow(inGame && !hidden ? target : IntPtr.Zero);
         // Raccourcis pris seulement quand le jeu est au premier plan, pour ne pas les voler aux autres programmes.
         if (inGame != keys)
         {
@@ -346,7 +370,9 @@ sealed class Overlay : Form
     public void Dump(string file)
     {
         using (Bitmap b = Render()) b.Save(file, ImageFormat.Png);
-        Program.Out.WriteLine("dumped visible=" + (Visible ? 1 : 0) + " target=" + (target != IntPtr.Zero ? 1 : 0));
+        int shown;
+        using (Bitmap m = markers.Render(1280, 720, out shown)) m.Save(file + ".markers.png", ImageFormat.Png);
+        Program.Out.WriteLine("dumped visible=" + (Visible ? 1 : 0) + " target=" + (target != IntPtr.Zero ? 1 : 0) + " markers=" + shown);
     }
 
     Bitmap Render()
@@ -416,19 +442,99 @@ sealed class Overlay : Form
 
     void Present()
     {
-        using (Bitmap b = Render())
+        using (Bitmap b = Render()) Native.Layer(Handle, b, place.X, place.Y);
+    }
+}
+
+/// Noms des autres joueurs, placés dans le monde quand la caméra du jeu est connue.
+sealed class Markers : Form
+{
+    readonly Bridge bridge;
+    readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
+    readonly Font font = new Font("Segoe UI Semibold", 10.5f);
+    IntPtr target;
+
+    public Markers(Bridge b)
+    {
+        bridge = b;
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        timer.Interval = 33;
+        timer.Tick += delegate { Draw(); };
+        timer.Start();
+    }
+
+    protected override CreateParams CreateParams
+    {
+        get
         {
-            IntPtr screen = Native.GetDC(IntPtr.Zero), mem = Native.CreateCompatibleDC(screen), bits = b.GetHbitmap(Color.FromArgb(0)), old = Native.SelectObject(mem, bits);
-            Native.POINT at = new Native.POINT(); at.X = place.X; at.Y = place.Y;
-            Native.POINT zero = new Native.POINT();
-            Native.SIZE size = new Native.SIZE(); size.W = b.Width; size.H = b.Height;
-            Native.BLEND blend = new Native.BLEND(); blend.Alpha = 255; blend.Format = 1;
-            Native.UpdateLayeredWindow(Handle, screen, ref at, ref size, mem, ref zero, 0, ref blend, 2);
-            Native.SelectObject(mem, old);
-            Native.DeleteObject(bits);
-            Native.DeleteDC(mem);
-            Native.ReleaseDC(IntPtr.Zero, screen);
+            CreateParams p = base.CreateParams;
+            p.ExStyle |= 0x80000 | 0x20 | 0x08000000 | 0x80 | 0x8;
+            return p;
         }
+    }
+
+    protected override bool ShowWithoutActivation { get { return true; } }
+
+    public void Follow(IntPtr window) { target = window; }
+
+    /// Position à l'écran d'un point du monde, ou false s'il est hors champ.
+    static bool Project(double[] m, double x, double y, double z, double w, double h, out float sx, out float sy)
+    {
+        double cx = m[0] * x + m[1] * y + m[2] * z + m[3], cy = m[4] * x + m[5] * y + m[6] * z + m[7], cw = m[12] * x + m[13] * y + m[14] * z + m[15];
+        sx = sy = 0;
+        if (!(cw > 0.01)) return false; // derrière la caméra
+        double nx = cx / cw, ny = cy / cw;
+        if (!(Math.Abs(nx) <= 1.2 && Math.Abs(ny) <= 1.2)) return false;
+        sx = (float)((nx + 1) / 2 * w);
+        sy = (float)((1 - ny) / 2 * h);
+        return true;
+    }
+
+    public Bitmap Render(int w, int h, out int count)
+    {
+        Bitmap b = new Bitmap(w, h, PixelFormat.Format32bppPArgb);
+        count = 0;
+        using (Graphics g = Graphics.FromImage(b))
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            lock (bridge.Lock)
+            {
+                if (bridge.View == null || (DateTime.UtcNow - bridge.ViewAt).TotalSeconds > 1) return b;
+                foreach (Remote r in bridge.Remotes.Values)
+                {
+                    float x, y;
+                    if (!Project(bridge.View, r.X, r.Y, r.Z, w, h, out x, out y)) continue;
+                    count++;
+                    string text = r.Name;
+                    if (bridge.HasSelf)
+                    {
+                        double d = Math.Sqrt(Math.Pow(r.X - bridge.SelfX, 2) + Math.Pow(r.Y - bridge.SelfY, 2) + Math.Pow(r.Z - bridge.SelfZ, 2));
+                        text += "  " + (d < 1000 ? Math.Round(d) + " m" : (d / 1000).ToString("0.0") + " km");
+                    }
+                    SizeF size = g.MeasureString(text, font);
+                    RectangleF box = new RectangleF(x - size.Width / 2 - 8, y - size.Height - 18, size.Width + 16, size.Height + 4);
+                    using (SolidBrush back = new SolidBrush(Color.FromArgb(175, 16, 20, 18))) g.FillRectangle(back, box);
+                    g.DrawString(text, font, Brushes.White, box.X + 8, box.Y + 2);
+                    using (SolidBrush dot = new SolidBrush(Color.FromArgb(246, 184, 60))) g.FillPolygon(dot, new PointF[] { new PointF(x - 6, y - 12), new PointF(x + 6, y - 12), new PointF(x, y - 4) });
+                }
+            }
+        }
+        return b;
+    }
+
+    void Draw()
+    {
+        bool live;
+        lock (bridge.Lock) live = bridge.View != null && (DateTime.UtcNow - bridge.ViewAt).TotalSeconds < 1 && bridge.Remotes.Count > 0;
+        Native.RECT r = new Native.RECT();
+        if (target == IntPtr.Zero || !live || !Native.GetClientRect(target, out r) || r.R < 64 || r.B < 64 || r.R > 8192 || r.B > 8192) { if (Visible) Hide(); return; }
+        Native.POINT at = new Native.POINT();
+        Native.ClientToScreen(target, ref at);
+        if (!Visible) Show();
+        int n;
+        using (Bitmap b = Render(r.R, r.B, out n)) Native.Layer(Handle, b, at.X, at.Y);
     }
 }
 
@@ -494,7 +600,7 @@ static class Native
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr l);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out int pid);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
-    [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr h, out RECT r);
+    [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
     [DllImport("user32.dll")] static extern bool IsHungAppWindow(IntPtr h);
     [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr h);
     [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool attach);
@@ -512,6 +618,21 @@ static class Native
     [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr dc, IntPtr o);
     [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr o);
     [DllImport("gdi32.dll")] public static extern bool DeleteDC(IntPtr dc);
+
+    /// Pose une image à transparence par pixel dans une fenêtre superposée.
+    public static void Layer(IntPtr window, Bitmap b, int x, int y)
+    {
+        IntPtr screen = GetDC(IntPtr.Zero), mem = CreateCompatibleDC(screen), bits = b.GetHbitmap(Color.FromArgb(0)), old = SelectObject(mem, bits);
+        POINT at = new POINT(); at.X = x; at.Y = y;
+        POINT zero = new POINT();
+        SIZE size = new SIZE(); size.W = b.Width; size.H = b.Height;
+        BLEND blend = new BLEND(); blend.Alpha = 255; blend.Format = 1;
+        UpdateLayeredWindow(window, screen, ref at, ref size, mem, ref zero, 0, ref blend, 2);
+        SelectObject(mem, old);
+        DeleteObject(bits);
+        DeleteDC(mem);
+        ReleaseDC(IntPtr.Zero, screen);
+    }
 
     /// Donne le focus à notre fenêtre depuis celle du jeu, que Windows protège du vol de focus.
     public static void ForceForeground(IntPtr ours, IntPtr from)

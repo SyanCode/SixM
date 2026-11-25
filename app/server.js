@@ -10,6 +10,7 @@ import { Hosts, lanAddress } from './hosts.js';
 import { findVictory, Launcher, resolveGame } from './launcher.js';
 import { Session } from './session.js';
 import { Settings } from './settings.js';
+import { Updater } from './updater.js';
 import { openExternal } from './window.js';
 
 const UI = path.join(path.dirname(fileURLToPath(import.meta.url)), 'ui');
@@ -37,7 +38,7 @@ class HttpError extends Error {
  * fichiers : chaque appel exige le jeton de la session et un en-tête Host exact, pour qu'aucun site
  * web ouvert dans le navigateur ne puisse la piloter (CSRF, DNS rebinding).
  */
-export async function createApp({ dataDir, port = 0, adapterOptions, builderOptions = {}, onQuit = () => {} }) {
+export async function createApp({ dataDir, port = 0, adapterOptions, builderOptions = {}, updaterOptions = {}, autoUpdate = false, onRestart = () => {}, onQuit = () => {} }) {
   const token = crypto.randomBytes(24).toString('base64url');
   const settings = new Settings(dataDir);
   const hosts = new Hosts(path.join(dataDir, 'servers'));
@@ -45,6 +46,7 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
   const linkDir = path.join(dataDir, 'link');
   let link = null;
   const launcher = new Launcher(path.join(dataDir, 'logs'), {
+    profiles: path.join(dataDir, 'profiles'),
     onExit: (error) => { if (session.adapterName === 'victory') session.disconnect(error ?? 'le jeu est fermé'); },
   });
   const victory = new VictoryBuilder(path.join(dataDir, 'victory'), {
@@ -57,6 +59,18 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
     if (known) settings.update({ victory: known.exe });
     else victory.check().catch((e) => console.error('[victory]', e.message));
   }
+  const quiet = () => session.status === 'idle' && !victory.busy && !launcher.pid
+    && ![...hosts.running.values()].some((r) => ['starting', 'running', 'stopping'].includes(r.status));
+  const updater = new Updater(dataDir, { canApply: quiet, onRestart, ...updaterOptions });
+  /** Cherche puis applique ; VIctory est recompilé si SixM a changé son module. */
+  const autoUpdateStep = async () => {
+    if (!settings.value.autoUpdate) return;
+    if (updater.status !== 'available') await updater.check();
+    if (!await updater.apply() && quiet()) victory.autoRebuild();
+  };
+  const tryUpdate = () => autoUpdateStep().catch((e) => console.error('[update]', e.message));
+  const updateTimer = autoUpdate ? setInterval(tryUpdate, 30 * 60000) : null;
+  if (autoUpdate) tryUpdate();
   let lastSeen = Date.now();
   let origin;
 
@@ -78,13 +92,14 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
     const game = selectedGame();
     const victory = settings.value.target !== 'demo';
     if (session.status !== 'idle') throw new Error('déjà connecté à un serveur');
-    if (game && !launcher.pid) launcher.check(settings.value.victory, game);
+    if (game && !launcher.pid) { launcher.check(settings.value.victory, game); await launcher.prepare(); }
     if (victory) await ensureLink();
     session.connect({ address, password, name: settings.value.name, adapter: victory ? 'victory' : 'mock' })
       .then(async (ok) => {
         if (!ok) return;
         settings.remember(address);
         if (game && !launcher.pid) launcher.launch(settings.value.victory, game);
+        if (game) session.useModule(launcher.bridge);
         if (victory) await attach();
       })
       .catch((e) => session.disconnect(e.message));
@@ -96,8 +111,9 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
   }, 3000);
 
   const routes = {
-    'GET /api/state': async () => ({ settings: settings.value, session: session.state(), hosts: hosts.list(), lan: await lanAddress(), game: launcher.state(), linkSupported, victory: { ...victory.state(), valid: victoryValid() } }),
-    'POST /api/settings': ({ name, target, victory, games }) => settings.update({
+    'GET /api/state': async () => ({ settings: settings.value, session: session.state(), hosts: hosts.list(), lan: await lanAddress(), game: launcher.state(), linkSupported, victory: { ...victory.state(), valid: victoryValid() }, update: updater.state() }),
+    'POST /api/settings': ({ name, target, victory, games, autoUpdate: auto }) => settings.update({
+      ...(auto !== undefined && { autoUpdate: auto === true }),
       ...(name !== undefined && { name }), ...(target !== undefined && { target }),
       ...(victory !== undefined && { victory }), ...(games !== undefined && { games }),
     }),
@@ -106,9 +122,17 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
       return { file: await pickPath(String(title ?? '').slice(0, 80) || 'Choisir', { folder: folder === true, dir: linkDir }) };
     },
     'POST /api/game/check': ({ path: target }) => ({ exe: resolveGame(target) }),
-    'POST /api/game/launch': () => {
+    'POST /api/update/check': async () => { await updater.check(); },
+    'POST /api/update/apply': () => {
+      if (!quiet()) throw new Error('quittez la partie et arrêtez vos serveurs d\'abord');
+      updater.apply();
+    },
+    'POST /api/victory/rebuild': () => { victory.rebuild(); },
+    'POST /api/profiles': () => { fs.mkdirSync(launcher.profiles, { recursive: true }); return openExternal(launcher.profiles); },
+    'POST /api/game/launch': async () => {
       const game = selectedGame();
       if (!game) throw new Error('choisissez une installation du jeu');
+      await launcher.prepare();
       launcher.launch(settings.value.victory, game);
     },
     'POST /api/game/stop': () => launcher.stop(),
@@ -202,13 +226,13 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
   return {
     origin, token, settings, hosts, session, launcher,
     get link() { return link; },
-    victory,
+    victory, updater,
     /** Rien en cours et plus aucune fenêtre ouverte depuis `ms`. */
-    idleFor: (ms) => Date.now() - lastSeen > ms && session.status === 'idle' && !victory.busy && !launcher.pid
-      && ![...hosts.running.values()].some((r) => ['starting', 'running'].includes(r.status)),
+    idleFor: (ms) => Date.now() - lastSeen > ms && quiet() && !updater.busy,
     url: `${origin}/#${token}`,
     close: async () => {
       clearInterval(attachTimer);
+      clearInterval(updateTimer);
       await victory.close();
       await session.disconnect();
       await link?.stop();

@@ -27,6 +27,7 @@ SixM es un framework multijugador y de modding independiente del juego, al estil
 | **Jugar** | Elige un juego y un servidor y pulsa Jugar. Favoritos, chat, jugadores, radar. El modo demo no necesita juego. |
 | **VIctory** | Descarga y compila VIctory en tu PC, en una versión fija, con registro en directo. Las actualizaciones son siempre manuales. |
 | **Superposición en el juego** | Chat, jugadores y radar sobre la ventana del juego. F8 para escribir, F9 para ocultar. Solo Windows. |
+| **Otros jugadores** | Sus nombres aparecen en el mundo, en su posición, gracias al módulo de SixM para VIctory. Requiere un perfil local. |
 | **Alojar** | Tu servidor en dos clics: contraseña, bloqueos, consola, ajustes. |
 | **Mods** | Suelta un zip y actívalo. Los jugadores lo reciben al conectarse. |
 | **Seguridad** | Los scripts que envía un servidor se ejecutan aislados en QuickJS/WebAssembly. |
@@ -63,7 +64,7 @@ node bin/sixm.js start ../my-server
 
 | ✅ Funciona | ⛔ Todavía no |
 |---|---|
-| Servidores, mods, interfaz y chat | Personajes y posiciones de los demás jugadores en el juego: requiere un módulo en VIctory |
+| Servidores, mods, interfaz y chat | Los nombres de los demás jugadores en el juego requieren un perfil de tu versión (no se incluye ninguno); sus personajes están pendientes en el módulo |
 | Lanzamiento de VIctory y superposición, probados con un VIctory simulado | VIctory aún no es jugable, según sus autores |
 | VIctory compilado y verificado, sin juego | Interfaz solo en francés; sin cifrado si no hay un proxy TLS |
 

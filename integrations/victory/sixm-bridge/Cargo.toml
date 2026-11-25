@@ -1,0 +1,10 @@
+[package]
+name = "sixm-bridge"
+description = "SixM module for VIctory: local player and camera, read through a user profile."
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+publish = false
+
+[dependencies]

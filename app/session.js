@@ -1,6 +1,7 @@
 import { SixMClient } from '../client/client.js';
 import { createAdapter } from '../client/adapters/index.js';
 import { serverUrl } from '../client/address.js';
+import { GameModule } from '../client/module.js';
 
 const MAX_LOG = 200;
 
@@ -68,6 +69,7 @@ export class Session {
       status: this.status, attempt: this.attempt, address: this.address, adapter: this.adapterName, error: this.error, log: this.log,
       serverName: connected ? client.serverName : null,
       id: connected ? client.id : null,
+      module: this.adapter?.module?.state() ?? null,
       local: connected ? client.adapter.getLocalPlayerPosition() : null,
       players: connected ? client.players : [],
       roster: connected ? client.roster : [],
@@ -76,6 +78,11 @@ export class Session {
 
   /** Attache la surcouche à la fenêtre d'un processus. */
   setTarget(pid) { this.adapter?.setTarget?.(pid); }
+
+  /** Branche le module du jeu lancé par SixM. */
+  useModule(bridge) {
+    if (bridge && this.adapter?.useModule && !this.adapter.module) this.adapter.useModule(new GameModule(bridge));
+  }
 
   #end(error) {
     const { address } = this;

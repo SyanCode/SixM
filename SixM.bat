@@ -9,5 +9,7 @@ if errorlevel 1 (
   exit /b 1
 )
 if not exist node_modules\quickjs-emscripten call npm install --omit=dev
+:run
 node bin\sixm.js
+if errorlevel 75 if not errorlevel 76 goto run
 if errorlevel 1 pause

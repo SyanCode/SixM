@@ -27,6 +27,7 @@ SixM is a game-agnostic multiplayer and modding framework in the spirit of FiveM
 | **Play** | Pick a game and a server, then press Play. Favourites, chat, players, radar. A demo mode needs no game. |
 | **VIctory** | Downloads and compiles VIctory on your PC, at a pinned version, with a live log. Updates are always manual. |
 | **In-game overlay** | Chat, players and radar on top of the game window. F8 to type, F9 to hide. Windows only. |
+| **Other players** | Their names appear in the world, at their position, through SixM's module for VIctory. Needs a local profile. |
 | **Host** | Your server in two clicks: password, bans, console, settings. |
 | **Mods** | Drop a zip, switch it on. Players receive it when they connect. |
 | **Safety** | Scripts sent by a server run isolated in QuickJS/WebAssembly. |
@@ -63,7 +64,7 @@ node bin/sixm.js start ../my-server
 
 | ✅ Works | ⛔ Not yet |
 |---|---|
-| Servers, mods, interface and chat | Other players' characters and positions inside the game: needs a module in VIctory |
+| Servers, mods, interface and chat | Other players' names in the game need a profile for your game version (none is provided); their characters need more work in the module |
 | Launching VIctory and the overlay, tested with a fake VIctory | VIctory itself is not playable yet, according to its authors |
 | VIctory compiled and checked, without a game | Interface in French only; no encryption without a TLS proxy |
 
