@@ -4,7 +4,9 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { queryServer } from '../client/address.js';
+import { linkSupported, pickPath, startLink } from '../client/link.js';
 import { Hosts, lanAddress } from './hosts.js';
+import { findVictory, Launcher, resolveGame } from './launcher.js';
 import { Session } from './session.js';
 import { Settings } from './settings.js';
 import { openExternal } from './window.js';
@@ -39,19 +41,65 @@ export async function createApp({ dataDir, port = 0, adapterOptions, onQuit = ()
   const settings = new Settings(dataDir);
   const hosts = new Hosts(path.join(dataDir, 'servers'));
   const session = new Session({ adapterOptions });
+  const linkDir = path.join(dataDir, 'link');
+  let link = null;
+  const launcher = new Launcher(path.join(dataDir, 'logs'), {
+    onExit: (error) => { if (session.adapterName === 'victory') session.disconnect(error ?? 'le jeu est fermé'); },
+  });
   let origin;
 
-  const connect = (address, password) => {
-    session.connect({ address, password, name: settings.value.name, adapter: settings.value.adapter })
-      .then(() => { if (session.status === 'connected') settings.remember(address); })
-      .catch((e) => console.error('[app]', e));
+  const selectedGame = () => settings.value.games.find((g) => g.id === settings.value.target);
+
+  const ensureLink = async () => {
+    if (!linkSupported || link) return;
+    const started = await startLink({ port: adapterOptions?.port, dir: linkDir });
+    if (started.external) return; // un autre bridge répond déjà
+    link = started;
+    started.exited.then(() => { if (link === started) link = null; });
   };
 
+  /** Surcouche sur le jeu lancé ici, ou sur un VIctory ouvert à côté. */
+  const attach = async () => session.setTarget(launcher.pid || await findVictory(settings.value.victory));
+
+  /** Rejoint un serveur dans le mode choisi ; le jeu n'est lancé qu'une fois le serveur accepté. */
+  const connect = async (address, password) => {
+    const game = selectedGame();
+    const victory = settings.value.target !== 'demo';
+    if (session.status !== 'idle') throw new Error('déjà connecté à un serveur');
+    if (game && !launcher.pid) launcher.check(settings.value.victory, game);
+    if (victory) await ensureLink();
+    session.connect({ address, password, name: settings.value.name, adapter: victory ? 'victory' : 'mock' })
+      .then(async (ok) => {
+        if (!ok) return;
+        settings.remember(address);
+        if (game && !launcher.pid) launcher.launch(settings.value.victory, game);
+        if (victory) await attach();
+      })
+      .catch((e) => session.disconnect(e.message));
+  };
+
+  // VIctory ouvert à la main peut arriver ou repartir à tout moment.
+  const attachTimer = setInterval(() => {
+    if (session.status === 'connected' && session.adapterName === 'victory' && !launcher.pid) attach().catch(() => {});
+  }, 3000);
+
   const routes = {
-    'GET /api/state': async () => ({ settings: settings.value, session: session.state(), hosts: hosts.list(), lan: await lanAddress() }),
-    'POST /api/settings': ({ name, adapter }) => settings.update({
-      ...(name !== undefined && { name }), ...(adapter !== undefined && { adapter }),
+    'GET /api/state': async () => ({ settings: settings.value, session: session.state(), hosts: hosts.list(), lan: await lanAddress(), game: launcher.state(), linkSupported }),
+    'POST /api/settings': ({ name, target, victory, games }) => settings.update({
+      ...(name !== undefined && { name }), ...(target !== undefined && { target }),
+      ...(victory !== undefined && { victory }), ...(games !== undefined && { games }),
     }),
+    'POST /api/pick': async ({ title, folder }) => {
+      if (!linkSupported) throw new Error('écrivez le chemin à la main');
+      return { file: await pickPath(String(title ?? '').slice(0, 80) || 'Choisir', { folder: folder === true, dir: linkDir }) };
+    },
+    'POST /api/game/check': ({ path: target }) => ({ exe: resolveGame(target) }),
+    'POST /api/game/launch': () => {
+      const game = selectedGame();
+      if (!game) throw new Error('choisissez une installation du jeu');
+      launcher.launch(settings.value.victory, game);
+    },
+    'POST /api/game/stop': () => launcher.stop(),
     'POST /api/favorite': ({ address, label }) => settings.toggleFavorite(String(address), label),
     'POST /api/query': async ({ address }) => {
       try { return { online: true, ...await queryServer(address) }; } catch { return { online: false }; }
@@ -59,11 +107,11 @@ export async function createApp({ dataDir, port = 0, adapterOptions, onQuit = ()
     'POST /api/connect': ({ address, password }) => {
       const target = String(address ?? '').trim();
       if (!target) throw new Error('entrez une adresse');
-      connect(target, password);
+      return connect(target, password);
     },
     'POST /api/hosts/play': ({ id }) => {
       const { address, password } = hosts.joinInfo(id);
-      connect(address, password);
+      return connect(address, password);
     },
     'POST /api/disconnect': () => session.disconnect(),
     'POST /api/chat': ({ text }) => session.chat(text),
@@ -132,10 +180,13 @@ export async function createApp({ dataDir, port = 0, adapterOptions, onQuit = ()
   });
   origin = `http://127.0.0.1:${server.address().port}`;
   return {
-    origin, token, settings, hosts, session,
+    origin, token, settings, hosts, session, launcher,
+    get link() { return link; },
     url: `${origin}/#${token}`,
     close: async () => {
+      clearInterval(attachTimer);
       await session.disconnect();
+      await link?.stop();
       await hosts.stopAll();
       server.close();
       server.closeAllConnections();

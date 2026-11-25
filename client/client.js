@@ -18,7 +18,8 @@ export class SixMClient {
       interpolationDelayMs, connectTimeoutMs, onDisconnect,
     });
     this.id = null;
-    this.players = [];
+    this.players = []; // avec position connue
+    this.roster = []; // tous
     this.remotes = new Map(); // id -> { name, buffer, applied }
     this.kickReason = null;
   }
@@ -30,6 +31,7 @@ export class SixMClient {
         onEmit: (name, args) => this.emitServer(name, ...args),
         onLog: (text) => this.adapter.log(clean(text)),
       });
+      this.adapter.onChat = (text) => this.emitServer('chat', clean(text, 200));
       await this.#handshake();
     } catch (e) {
       this.ws?.terminate();
@@ -134,6 +136,11 @@ export class SixMClient {
       }
       this.players = m.players.filter((p) => Number.isSafeInteger(p?.id) && isPos(p.pos))
         .map((p) => ({ id: p.id, name: clean(p.name, 24), pos: p.pos }));
+    } else if (m.t === 'roster') {
+      if (!Array.isArray(m.players)) return;
+      this.roster = m.players.slice(0, 1024).filter((p) => Number.isSafeInteger(p?.id))
+        .map((p) => ({ id: p.id, name: clean(p.name, 24) }));
+      this.adapter.setRoster(this.serverName, this.roster.map((p) => p.name));
     } else if (m.t === 'event') {
       if (typeof m.name === 'string' && Array.isArray(m.args)) this.sandbox.dispatch(m.name, m.args);
     } else if (m.t === 'kick') {

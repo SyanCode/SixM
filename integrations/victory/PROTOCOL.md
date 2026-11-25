@@ -1,8 +1,11 @@
 # Bridge SixM ⇄ VIctory
 
-**État :** côté SixM (`client/adapters/victory.js`) implémenté et testé contre un faux bridge.
-Côté VIctory, **le module bridge reste à écrire** : VIctory n'a pas d'API de plugin à ce jour
-(README du projet : « Not playable yet », réseau « offline by design »).
+**État :** deux bridges parlent ce protocole.
+- **SixM Link** (`link/SixMLink.cs`, Windows) : programme à part, sans modification de VIctory ni lecture de la
+  mémoire du jeu. Surcouche (chat, joueurs, radar), F8 pour écrire, F9 pour masquer. Il ne connaît pas la position
+  du joueur et ne crée pas de personnages. SixM le compile et le lance tout seul.
+- **Module dans VIctory** : reste à écrire. VIctory n'a pas d'API de plugin à ce jour. Si un tel module écoute déjà
+  sur le port, SixM l'utilise à la place de SixM Link.
 
 ## Principe
 Le bridge s'exécute dans le processus VIctory, écoute en TCP **127.0.0.1:30121** (loopback
@@ -14,7 +17,11 @@ connecte comme client. Le bridge lit/écrit l'état du jeu ; le serveur SixM ne 
   L'adaptateur le refuse si le build n'est pas dans `allowedBuilds`.
 - `{"t":"localPlayer","x","y","z","h"}` — position du joueur local (~20 Hz).
 
+- `{"t":"chat","text"}` — message écrit par le joueur depuis le jeu.
+
 ## Adaptateur → bridge
+- `{"t":"target","pid"}` — processus du jeu, `0` = aucun.
+- `{"t":"roster","server","players":["nom"]}` — serveur et tous les joueurs, même sans position.
 - `{"t":"setRemote","id","name","x","y","z","h"}` — créer/déplacer l'avatar d'un joueur distant.
 - `{"t":"removeRemote","id"}`
 - `{"t":"log","text"}` — chat / notifications à afficher.

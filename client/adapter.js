@@ -16,5 +16,9 @@ export class GameAdapter {
   removeRemotePlayer(id) { throw new Error('non implémenté'); }
   /** Affichage de texte (chat, notifications). */
   log(text) { throw new Error('non implémenté'); }
+  /** Nom du serveur et de tous les joueurs (facultatif). */
+  setRoster(server, names) {}
+  /** Appelé par l'adaptateur quand le joueur écrit depuis le jeu ; défini par le client. */
+  onChat = null;
   async shutdown() {}
 }

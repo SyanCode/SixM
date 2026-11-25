@@ -1,15 +1,25 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const DEFAULTS = { name: 'Joueur', adapter: 'mock', favorites: [], recents: [] };
+const DEFAULTS = { name: 'Joueur', target: 'demo', victory: '', games: [], favorites: [], recents: [] };
 const clean = (v, max) => String(v).replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim().slice(0, max);
 
 function normalize(raw) {
   const s = { ...DEFAULTS, ...raw };
   const address = (v) => (typeof v === 'string' ? clean(v, 255) : '');
+  const games = (Array.isArray(s.games) ? s.games : []).slice(0, 20).map((g) => ({
+    id: /^[a-f0-9]{8}$/.test(g?.id) ? g.id : crypto.randomBytes(4).toString('hex'),
+    name: clean(g?.name ?? '', 40) || 'Mon jeu',
+    path: clean(g?.path ?? '', 1024), // dossier extrait, ou .exe
+    console: g?.console === 'series-s' ? 'series-s' : 'series-x',
+  }));
   return {
     name: clean(s.name ?? '', 24) || DEFAULTS.name,
-    adapter: ['mock', 'victory'].includes(s.adapter) ? s.adapter : DEFAULTS.adapter,
+    // 'demo' : sans jeu ; 'attach' : VIctory déjà ouvert ; sinon l'installation à lancer.
+    target: ['demo', 'attach', ...games.map((g) => g.id)].includes(s.target) ? s.target : DEFAULTS.target,
+    victory: clean(s.victory ?? '', 1024),
+    games,
     favorites: (Array.isArray(s.favorites) ? s.favorites : []).slice(0, 50)
       .map((f) => ({ address: address(f?.address), label: clean(f?.label ?? '', 64) })).filter((f) => f.address),
     recents: (Array.isArray(s.recents) ? s.recents : []).map(address).filter(Boolean).slice(0, 8),

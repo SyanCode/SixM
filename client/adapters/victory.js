@@ -26,6 +26,8 @@ export class VictoryAdapter extends GameAdapter {
     this.build = null;
     this.logs = [];
     this.remotes = new Map();
+    this.roster = null;
+    this.pid = 0;
     this.closing = false;
   }
 
@@ -71,10 +73,14 @@ export class VictoryAdapter extends GameAdapter {
             }
             ready = true;
             this.build = m.build; this.sock = sock;
+            if (this.pid) this.#send({ t: 'target', pid: this.pid });
+            if (this.roster) this.#send(this.roster);
             for (const [id, r] of this.remotes) this.#send({ t: 'setRemote', id, name: r.name, ...r.pos });
             resolve();
           } else if (ready && m.t === 'localPlayer' && [m.x, m.y, m.z, m.h].every(Number.isFinite)) {
             this.pos = { x: m.x, y: m.y, z: m.z, h: m.h };
+          } else if (ready && m.t === 'chat' && typeof m.text === 'string') {
+            this.onChat?.(m.text);
           }
         }
       });
@@ -112,6 +118,16 @@ export class VictoryAdapter extends GameAdapter {
   removeRemotePlayer(id) {
     this.remotes.delete(id);
     this.#send({ t: 'removeRemote', id });
+  }
+  setRoster(server, names) {
+    this.roster = { t: 'roster', server, players: names };
+    this.#send(this.roster);
+  }
+  /** Processus dont la fenêtre porte la surcouche ; 0 : aucun. */
+  setTarget(pid) {
+    if (pid === this.pid) return;
+    this.pid = pid;
+    this.#send({ t: 'target', pid });
   }
   log(text) { this.logs.push(text); this.#send({ t: 'log', text }); console.log(`[game] ${text}`); }
   async shutdown() { this.closing = true; (this.sock ?? this.pending)?.end(); }

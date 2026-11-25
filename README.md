@@ -12,6 +12,8 @@ A **game-agnostic** multiplayer / modding framework, in the spirit of FiveM, des
 | Resource system (`resource.json`, start/stop/restart, server + client scripts) | ✅ |
 | Script API (`sixm.on`, `onNet`, `emitClient`, `emitAllClients`, `getPlayers`, `kick`) | ✅ |
 | Self-hosting (`sixm init` / `start`, password, bans, admin console, `info.json`) | ✅ |
+| VIctory launcher and in-game overlay (Windows): chat, players, radar | ✅ tested with a fake VIctory |
+| Positions and characters of other players in the game | ⛔ needs a module inside VIctory |
 | Client interface: play, host, mods, downloadable server | ✅ (French UI) |
 | Client scripts isolated in QuickJS/WebAssembly | ✅ |
 | Reference client + mock adapter + test bot | ✅ |
@@ -22,7 +24,8 @@ A **game-agnostic** multiplayer / modding framework, in the spirit of FiveM, des
 
 Windows: double-click `SixM.bat` ([Node.js](https://nodejs.org) required). Elsewhere: `npm install`, then `npm run app`.
 
-- **Play**: address, favourites, chat, players, radar.
+- **Play**: pick a game installation and a server; SixM launches [VIctory](https://github.com/Marvisak/VIctory), then adds chat and players on top (F8 type, F9 hide). Demo mode without a game.
+- **Settings**: path to `victory.exe` and the game folder extracted from your disc. SixM ships neither VIctory nor the game.
 - **Host**: a server on this PC in two clicks, mods by dropping a zip.
 - **Download the server**: self-contained zip for a VPS, another PC or Docker.
 

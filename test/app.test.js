@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -103,12 +104,16 @@ test('réglages : valeurs nettoyées, fichier illisible toléré', () => {
   fs.writeFileSync(path.join(dir, 'settings.json'), '{cassé');
   const s = new Settings(dir);
   assert.equal(s.value.name, 'Joueur');
-  s.update({ name: ' Zoé\u0007 ', adapter: 'inconnu' });
+  s.update({ name: ' Zoé\u0007 ', target: 'inconnu', games: [{ name: '', path: 'C:\\a', console: 'x' }] });
   for (let i = 0; i < 20; i++) s.remember(`h${i}`);
   s.remember('h19');
   s.toggleFavorite('a', 'A'); s.toggleFavorite('b', 'B'); s.toggleFavorite('a');
   const again = new Settings(dir).value;
-  assert.deepEqual([again.name, again.adapter, again.recents.length, again.recents[0]], ['Zoé', 'mock', 8, 'h19']);
+  assert.deepEqual([again.name, again.target, again.recents.length, again.recents[0]], ['Zoé', 'demo', 8, 'h19']);
+  assert.deepEqual([again.games[0].name, again.games[0].console], ['Mon jeu', 'series-x']);
+  assert.match(again.games[0].id, /^[a-f0-9]{8}$/);
+  assert.equal(s.update({ target: again.games[0].id }).target, again.games[0].id);
+  assert.equal(s.update({ games: [] }).target, 'demo', 'installation retirée : retour à la démo');
   assert.deepEqual(again.favorites, [{ address: 'b', label: 'B' }]);
 });
 
@@ -171,16 +176,20 @@ test('jouer : connexion, chat, joueurs, mot de passe, déconnexion', async () =>
   await until(async () => (await s()).error === 'aucun serveur à cette adresse', 'erreur lisible');
 }));
 
-test('jouer en mode VIctory : attente annulable puis connexion au bridge', async () => {
+test('VIctory avec un bridge déjà présent : attente annulable puis position', async () => {
   const bridgePort = await freePort();
   await withApp(async ({ post, state }) => {
     const srv = await createServer({ name: 'V', port: 0 });
     const address = `localhost:${srv.net.port}`;
-    await post('/api/settings', { adapter: 'victory' });
+    await post('/api/settings', { target: 'attach' });
+    // Un bridge muet occupe le port : l'attente doit pouvoir être annulée.
+    const mute = net.createServer().listen(bridgePort, '127.0.0.1');
     await post('/api/connect', { address });
     assert.equal((await state()).session.status, 'connecting');
     await post('/api/disconnect');
     assert.deepEqual([(await state()).session.status, (await state()).session.error], ['idle', null]);
+
+    await new Promise((r) => mute.close(r));
 
     const bridge = await startSimBridge({ port: bridgePort, path: () => ({ x: 7, y: 0, z: 0, h: 0 }) });
     await post('/api/connect', { address });

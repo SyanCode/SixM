@@ -7,6 +7,7 @@ Client → serveur
 
 Serveur → client
 - `{t:"welcome", id, server, tickRate, resources:[{name,files:[{file,source}]}]}`
+- `{t:"roster", players:[{id,name}]}` — tous les joueurs, à chaque arrivée et départ
 - `{t:"snapshot", players:[{id,name,pos}]}` — à chaque tick ; limité à `syncRadius` si > 0, et sans les
   joueurs dont la position est encore inconnue. Un joueur absent du snapshot est retiré chez le client.
   `h` est en radians.

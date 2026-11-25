@@ -12,6 +12,8 @@ Framework multijoueur / modding **agnostique du jeu**, dans l'esprit de FiveM, p
 | Système de ressources (`resource.json`, start/stop/restart, scripts serveur + client) | ✅ |
 | API de script (`sixm.on`, `onNet`, `emitClient`, `emitAllClients`, `getPlayers`, `kick`) | ✅ |
 | Hébergement (`sixm init` / `start`, mot de passe, bans, console, `info.json`) | ✅ |
+| Launcher VIctory et surcouche en jeu (Windows) : chat, joueurs, radar | ✅ testé avec un faux VIctory |
+| Position et personnages des autres joueurs dans le jeu | ⛔ demande un module dans VIctory |
 | Interface client : jouer, héberger, mods, serveur à télécharger | ✅ |
 | Scripts client isolés dans QuickJS/WebAssembly | ✅ |
 | Client de référence + adaptateur simulé + bot de test | ✅ |
@@ -21,7 +23,8 @@ Framework multijoueur / modding **agnostique du jeu**, dans l'esprit de FiveM, p
 
 Windows : double-cliquez sur `SixM.bat` ([Node.js](https://nodejs.org) requis). Ailleurs : `npm install` puis `npm run app`.
 
-- **Jouer** : adresse, favoris, chat, joueurs, radar.
+- **Jouer** : choisissez l'installation du jeu et le serveur ; SixM lance [VIctory](https://github.com/Marvisak/VIctory) puis ajoute chat et joueurs par-dessus (F8 écrire, F9 masquer). Mode démo sans jeu.
+- **Réglages** : chemin de `victory.exe` et dossier du jeu extrait de votre disque. SixM ne fournit ni VIctory ni le jeu.
 - **Héberger** : serveur sur ce PC en deux clics, mods par glisser-déposer d'un zip.
 - **Télécharger le serveur** : zip autonome pour un VPS, un autre PC ou Docker.
 

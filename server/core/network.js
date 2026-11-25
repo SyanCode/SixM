@@ -12,7 +12,7 @@ const sha256 = (s) => crypto.createHash('sha256').update(s).digest();
 /**
  * Protocole JSON sur WebSocket (voir docs/PROTOCOL.md).
  * client -> serveur : hello | pos | event
- * serveur -> client : welcome | snapshot | event | kick
+ * serveur -> client : welcome | roster | snapshot | event | kick
  * Le même port sert /info.json et /players.json en HTTP.
  */
 export class Network {
@@ -131,6 +131,7 @@ export class Network {
       if (n > 0) this.connections.set(ip, n); else this.connections.delete(ip);
       if (!player) return;
       this.world.removePlayer(player.id);
+      this.#sendRoster();
       this.events.emit('playerDropped', player);
     });
 
@@ -154,6 +155,7 @@ export class Network {
           t: 'welcome', id: player.id, server: this.config.name,
           tickRate: this.config.tickRate, resources: this.resources.clientBundle(),
         });
+        this.#sendRoster();
         this.events.emit('playerConnected', player);
         return;
       }
@@ -166,6 +168,11 @@ export class Network {
         this.events.emit(`net:${m.name}`, player, ...(Array.isArray(m.args) ? m.args : []));
       }
     });
+  }
+
+  /** Tous les joueurs, même sans position connue ou hors du rayon de synchro. */
+  #sendRoster() {
+    this.broadcast({ t: 'roster', players: [...this.world.players.values()].map(({ id, name }) => ({ id, name })) });
   }
 
   // Limite simple : 200 messages / seconde / connexion

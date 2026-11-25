@@ -16,6 +16,40 @@ function h(tag, props = {}, ...children) {
   return el;
 }
 const btn = (text, onclick, cls = '', props = {}) => h('button', { type: 'button', class: `btn ${cls}`, onclick, ...props }, text);
+const ICONS = {
+  star: ['M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8-5.3-2.7-5.3 2.7 1-5.8-4.2-4.1 5.9-.9z'],
+  lock: ['M6 11h12v9H6z', 'M8.5 11V8a3.5 3.5 0 017 0v3'],
+  link: ['M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1', 'M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1'],
+  pad: ['M7 8h10a4 4 0 014 4l.6 4.2a2.3 2.3 0 01-4 1.8L15.5 16h-7l-2.1 2a2.3 2.3 0 01-4-1.8L3 12a4 4 0 014-4z', 'M8 10.5v3M6.5 12h3M16 11v.01M17.5 13v.01'],
+  globe: ['M12 3a9 9 0 100 18 9 9 0 000-18z', 'M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18'],
+  pc: ['M4 5h16v11H4z', 'M9 20h6M12 16v4'],
+  down: ['M12 4v11M7.5 10.5L12 15l4.5-4.5M5 20h14'],
+  box: ['M12 3l8 4.5v9L12 21l-8-4.5v-9z', 'M4 7.5l8 4.5 8-4.5M12 12v9'],
+  back: ['M14 6l-6 6 6 6'],
+  send: ['M4 12l16-7-5 15-3.5-6z'],
+};
+function icon(name) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'i');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const d of ICONS[name]) {
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('d', d);
+    svg.append(p);
+  }
+  return svg;
+}
+/** Hexagone aux initiales, couleur stable par nom. */
+function avatar(name, cls = '') {
+  const words = name.replace(/[^\p{L}\p{N} ]/gu, ' ').trim().split(/\s+/);
+  const el = h('span', { class: `hex ${cls}`, 'aria-hidden': 'true' }, words.map((w) => [...w][0] ?? '').slice(0, 2).join('').toUpperCase() || '?');
+  let hash = 0;
+  for (const c of name) hash = (hash * 31 + c.codePointAt(0)) >>> 0;
+  if (!cls.includes('mine')) el.style.background = `hsl(${hash % 360} var(--sat) var(--lum))`;
+  return el;
+}
+const iconBtn = (name, text, onclick, cls = '') => { const b = btn('', onclick, cls); b.append(icon(name), text); return b; };
 const field = (label, input) => h('label', { class: 'field' }, label, input);
 
 // --- Échanges avec l'application -------------------------------------------------------------
@@ -54,7 +88,7 @@ function ask(title, build) {
     let result = null;
     const form = h('form', { method: 'dialog' });
     const { body, submit, value } = build(form);
-    form.append(h('h2', {}, title), ...body, h('div', { class: 'row' },
+    form.append(h('h2', {}, title), ...body, h('div', { class: 'actions' },
       btn('Annuler', () => dialog.close(), 'quiet'), h('button', { class: 'btn primary' }, submit)));
     form.addEventListener('submit', (e) => { e.preventDefault(); result = value(); dialog.close(); });
     dialog.replaceChildren(form);
@@ -72,11 +106,13 @@ let hostTab = 'console';
 let screen = { key: null, update: () => {} };
 let promptedAttempt = 0; // dernier échec pour lequel le mot de passe a été redemandé
 const statuses = new Map(); // adresse -> fiche
+let chosen = null; // destination : { solo: true } ou { address }
 
 async function refresh() {
   try {
     state = await (await request('/api/state')).json();
   } catch (e) {
+    $('#dock').hidden = true;
     if (screen.key !== 'offline') show('offline', () => ({
       el: h('div', { class: 'center' }, h('h1', {}, e.offline ? 'SixM est fermé' : 'Session expirée'), h('p', { class: 'muted' }, e.message)),
     }));
@@ -85,7 +121,10 @@ async function refresh() {
   render();
 }
 
-const modeName = (m) => (m === 'victory' ? 'VIctory' : 'Démo, sans jeu');
+const targetName = () => {
+  const { target, games } = state.settings;
+  return target === 'demo' ? 'Démo, sans jeu' : target === 'attach' ? 'VIctory déjà ouvert' : games.find((g) => g.id === target)?.name ?? '';
+};
 
 /** Affiche un écran ; il n'est reconstruit que si sa clé change, sinon seulement mis à jour. */
 function show(key, build) {
@@ -100,14 +139,18 @@ function show(key, build) {
 
 function render() {
   const { session, settings, hosts } = state;
-  $('#foot-name').textContent = settings.name;
-  $('#foot-mode').textContent = modeName(settings.adapter);
+  if ($('#me').dataset.name !== settings.name) {
+    $('#me').dataset.name = settings.name;
+    $('#me').replaceChildren(h('span', {}, settings.name), avatar(settings.name, 'mine'));
+  }
   const live = hosts.some((x) => x.status === 'running');
   $('#nav-host').hidden = !live;
-  $('#nav-host').classList.toggle('on', live);
   for (const b of document.querySelectorAll('nav button'))
     b.dataset.view === view ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current');
 
+  const idle = view === 'play' && session.status === 'idle';
+  $('#dock').hidden = !idle;
+  if (idle) updateDock();
   if (view === 'settings') return show('settings', settingsScreen);
   if (view === 'host') {
     const host = hosts.find((x) => x.id === hostId);
@@ -124,10 +167,16 @@ for (const b of document.querySelectorAll('nav button')) {
   b.addEventListener('click', () => { view = b.dataset.view; hostId = null; render(); });
 }
 
+$('#me').addEventListener('click', () => { view = 'settings'; render(); });
+
 // --- Jouer ------------------------------------------------------------------------------------
+
+const ownHost = (address) => state.hosts.find((x) => x.status === 'running' && address === `localhost:${x.port}`);
 
 async function join(address, retry = false) {
   let password;
+  const own = ownHost(address);
+  if (own) return act(() => post('/api/hosts/play', { id: own.id })); // son propre serveur : sans mot de passe
   const info = statuses.get(address);
   if (retry || info?.password) {
     const input = h('input', { type: 'password', required: true, autocomplete: 'off', autofocus: true });
@@ -143,30 +192,42 @@ async function join(address, retry = false) {
 async function queryAll() {
   if (!state || view !== 'play' || document.hidden || state.session.status !== 'idle') return;
   const { favorites, recents } = state.settings;
-  await Promise.all([...new Set([...favorites.map((f) => f.address), ...recents])].map(async (address) => {
+  const mine = state.hosts.filter((x) => x.status === 'running').map((x) => `localhost:${x.port}`);
+  await Promise.all([...new Set([...favorites.map((f) => f.address), ...recents, ...mine])].map(async (address) => {
     const info = await post('/api/query', { address }).catch(() => null);
     if (info) statuses.set(address, info);
   }));
   render();
 }
 
-function serverRow(address, label) {
-  const dot = h('span', { class: 'dot' });
-  const title = h('div', { class: 'title' });
-  const sub = h('div', { class: 'sub num' });
-  const star = h('button', { class: 'star', type: 'button', onclick: () => act(() => post('/api/favorite', { address, label: statuses.get(address)?.name ?? label })) });
-  const el = h('div', { class: 'item' }, dot, h('div', { class: 'grow' }, title, sub), star, btn('Rejoindre', () => join(address)));
+/** Carte d'une destination. */
+function serverCard(address, label) {
+  const name = h('button', { type: 'button', class: 'hit', onclick: () => { chosen = { address }; render(); }, ondblclick: () => go() });
+  const sub = h('div', { class: 'sub' });
+  const star = h('button', { class: 'star', type: 'button', onclick: () => act(() => post('/api/favorite', { address, label: statuses.get(address)?.name ?? label })) }, icon('star'));
+  const face = h('span'), bar = h('i'), meter = h('div', { class: 'meter' }, bar), count = h('span', { class: 'num' }), extra = h('span', { class: 'num' }), lock = h('span', { title: 'Mot de passe' }, icon('lock'));
+  const el = h('article', { class: 'card srv' }, h('div', { class: 'srv-top' }, face, h('div', { class: 'grow' }, name, sub), star), h('div', { class: 'srv-foot' }, meter, count, extra, lock));
+  let shown = null;
   return {
     el,
     update() {
-      const i = statuses.get(address);
-      dot.className = `dot ${i?.online ? 'on' : ''}`;
-      title.textContent = i?.name ?? (label || address);
-      sub.textContent = !i ? address
-        : !i.online ? `${address} · hors ligne`
-          : `${address} · ${i.players}/${i.maxPlayers} joueurs · ${i.ping} ms${i.password ? ' · mot de passe' : ''}`;
+      const i = statuses.get(address), title = i?.name ?? (label || ownHost(address)?.name || address);
+      if (title !== shown) { shown = title; face.replaceChildren(avatar(title, 'big')); name.textContent = title; }
+      sub.textContent = address;
+      el.classList.toggle('chosen', chosen?.address === address);
+      el.classList.toggle('off', i?.online === false);
+      name.setAttribute('aria-pressed', chosen?.address === address);
+      meter.hidden = lock.hidden = !i?.online;
+      if (i?.online) {
+        bar.style.width = `${Math.min(100, (i.players / Math.max(1, i.maxPlayers)) * 100)}%`;
+        count.textContent = `${i.players}/${i.maxPlayers}`;
+        extra.textContent = `${i.ping} ms`;
+        lock.hidden = !i.password;
+      } else {
+        count.textContent = i ? 'Hors ligne' : 'Recherche…';
+        extra.textContent = '';
+      }
       const fav = state.settings.favorites.some((f) => f.address === address);
-      star.textContent = fav ? '★' : '☆';
       star.setAttribute('aria-pressed', fav);
       star.title = fav ? 'Retirer des favoris' : 'Ajouter aux favoris';
       star.setAttribute('aria-label', star.title);
@@ -174,65 +235,158 @@ function serverRow(address, label) {
   };
 }
 
-function playScreen() {
-  const input = h('input', { placeholder: 'Adresse du serveur, par exemple 203.0.113.7', 'aria-label': 'Adresse du serveur', autocomplete: 'off', spellcheck: false, required: true });
-  const error = h('p', { class: 'note error', hidden: true });
-  const lists = h('div');
-  const submit = async (e) => {
-    e.preventDefault();
-    const address = input.value.trim();
-    if (!address) return;
+/** Barre de lancement : un jeu, une destination, un bouton. */
+const dock = (() => {
+  const game = h('div', { class: 'v' }), place = h('div', { class: 'v' });
+  const select = h('select', {
+    'aria-label': 'Jeu',
+    onchange: () => {
+      if (select.value === 'add') { view = 'settings'; render(); return; }
+      act(() => post('/api/settings', { target: select.value }));
+    },
+  });
+  const play = h('button', { type: 'button', class: 'play-btn', onclick: () => go() });
+  $('#dock').append(h('div', { class: 'dock' },
+    h('div', { class: 'slot pick' }, icon('pad'), h('div', { class: 'grow' }, h('div', { class: 'k' }, 'Jeu'), game), select),
+    h('div', { class: 'slot' }, icon('globe'), h('div', { class: 'grow' }, h('div', { class: 'k' }, 'Destination'), place)), play));
+  return { game, place, select, play, shape: null };
+})();
+
+const canSolo = () => state.settings.games.some((g) => g.id === state.settings.target);
+
+function updateDock() {
+  const { settings: s, game } = state;
+  const shape = JSON.stringify(s.games.map((g) => [g.id, g.name]));
+  if (shape !== dock.shape) {
+    dock.shape = shape;
+    dock.select.replaceChildren(h('option', { value: 'demo' }, 'Démo, sans jeu'), ...s.games.map((g) => h('option', { value: g.id }, g.name)),
+      ...(state.linkSupported ? [h('option', { value: 'attach' }, 'VIctory déjà ouvert')] : []), h('option', { value: 'add' }, 'Ajouter un jeu…'));
+  }
+  if (document.activeElement !== dock.select || dock.select.value === 'add') dock.select.value = s.target;
+  dock.game.textContent = targetName();
+  if (chosen?.solo && !canSolo()) chosen = null;
+  const address = chosen?.address;
+  dock.place.textContent = chosen?.solo ? 'Solo, sans serveur' : address ? statuses.get(address)?.name ?? ownHost(address)?.name ?? address : 'Choisissez un serveur';
+  const busy = chosen?.solo && game.status === 'running';
+  dock.play.disabled = !chosen || busy;
+  dock.play.textContent = busy ? 'En cours' : 'Jouer';
+}
+
+async function go() {
+  if (!chosen) return;
+  if (chosen.solo) { act(() => post('/api/game/launch')); return; }
+  const { address } = chosen;
+  if (!ownHost(address) && !statuses.get(address)) {
     // La fiche dit si un mot de passe est nécessaire.
     const info = await post('/api/query', { address }).catch(() => null);
     if (info) statuses.set(address, info);
-    join(address);
-  };
-  const el = h('div', {},
-    h('div', { class: 'head' }, h('div', {}, h('h1', {}, 'Rejoindre un serveur'), h('p', { class: 'muted' }, 'Collez l\'adresse donnée par l\'hébergeur.'))),
-    h('form', { class: 'join', onsubmit: submit }, input, h('button', { class: 'btn primary' }, 'Rejoindre')),
-    h('div', {}, error), lists);
-  let shape = '', rows = [];
+  }
+  join(address);
+}
+
+/** Bandeau du jeu lancé par SixM. */
+function gameBar() {
+  const text = h('div', { class: 'grow' });
+  const stop = btn('Arrêter le jeu', async () => {
+    const ok = await ask('Arrêter le jeu ?', () => ({ body: [h('p', {}, 'La progression non sauvegardée sera perdue.')], submit: 'Arrêter', value: () => true }));
+    if (ok) act(() => post('/api/game/stop'));
+  }, 'danger');
+  const log = h('div', { class: 'console short' });
+  const details = h('details', {}, h('summary', { class: 'small muted' }, 'Journal de VIctory'), log);
+  const el = h('div', { class: 'card', hidden: true }, h('div', { class: 'row' }, text, stop), details);
   return {
     el,
     update() {
-      const { settings, session } = state;
+      const { game } = state;
+      el.hidden = game.status === 'stopped';
+      text.textContent = game.status === 'running' ? `${game.name} est lancé` : game.error ?? '';
+      text.style.color = game.status === 'failed' ? 'var(--danger)' : '';
+      stop.hidden = game.status !== 'running';
+      const lines = game.log.join('\n');
+      if (log.textContent !== lines) { log.textContent = lines; log.scrollTop = log.scrollHeight; }
+      details.hidden = !lines;
+    },
+  };
+}
+
+function playScreen() {
+  const bar = gameBar(), error = h('p', { class: 'note error', hidden: true }), lists = h('div');
+  const input = h('input', {
+    placeholder: 'Adresse d\'un serveur', 'aria-label': 'Adresse d\'un serveur', autocomplete: 'off', spellcheck: false,
+    oninput: () => { const address = input.value.trim(); chosen = address ? { address } : null; render(); },
+  });
+  const el = h('div', {},
+    h('div', { class: 'head' }, h('h1', {}, 'Où voulez-vous jouer ?'),
+      h('form', { class: 'address', onsubmit: (e) => { e.preventDefault(); go(); } }, icon('link'), input)),
+    error, bar.el, lists);
+  let shape = '', cards = [], solo = null;
+  return {
+    el,
+    update() {
+      const { settings, session, hosts } = state;
+      bar.update();
       error.hidden = !session.error;
       error.textContent = cap(session.error ?? '');
-      error.style.marginTop = '12px';
       if (session.error === 'mot de passe incorrect' && session.attempt !== promptedAttempt) {
         promptedAttempt = session.attempt;
         join(session.address, true);
       }
-      const favs = settings.favorites, recents = settings.recents.filter((a) => !favs.some((f) => f.address === a));
-      const next = JSON.stringify([favs, recents]);
+      const own = hosts.filter((x) => x.status === 'running').map((x) => [`localhost:${x.port}`, x.name]);
+      const known = new Set(own.map(([a]) => a));
+      const favs = settings.favorites.filter((f) => !known.has(f.address)).map((f) => [f.address, f.label]);
+      for (const [a] of favs) known.add(a);
+      const recents = settings.recents.filter((a) => !known.has(a)).map((a) => [a, '']);
+      const next = JSON.stringify([own, favs, recents, canSolo() && settings.target]);
       if (next !== shape) {
         shape = next;
-        rows = [];
-        const section = (title, items) => {
-          if (!items.length) return [];
-          const r = items.map(([a, l]) => serverRow(a, l));
-          rows.push(...r);
-          return [h('h2', {}, title), h('div', { class: 'list' }, r.map((x) => x.el))];
+        cards = [];
+        solo = null;
+        const section = (title, items, before) => {
+          if (!items.length && !before) return [];
+          const c = items.map(([a, l]) => serverCard(a, l));
+          cards.push(...c);
+          return [h('div', { class: 'section' }, h('h2', {}, title)), h('div', { class: 'grid' }, before, c.map((x) => x.el))];
         };
-        const all = [...section('Favoris', favs.map((f) => [f.address, f.label])), ...section('Récents', recents.map((a) => [a, '']))];
-        lists.replaceChildren(...(all.length ? all : [
-          h('h2', {}, 'Pas encore de serveur'),
-          h('p', { class: 'muted' }, 'Ceux que vous rejoignez apparaîtront ici.'),
-          h('div', { class: 'gap' }, btn('Héberger mon serveur', () => { view = 'host'; render(); })),
-        ]));
+        if (canSolo()) {
+          const hit = h('button', { type: 'button', class: 'hit', onclick: () => { chosen = { solo: true }; input.value = ''; render(); }, ondblclick: () => go() }, 'Solo');
+          solo = h('article', { class: 'card srv' }, h('div', { class: 'srv-top' }, avatar('1', 'big mine'), h('div', { class: 'grow' }, hit, h('div', { class: 'sub' }, 'Le jeu, sans serveur'))),
+            h('div', { class: 'srv-foot' }, settings.games.find((g) => g.id === settings.target)?.name));
+        }
+        const all = [...section('Vos serveurs', own), ...section('Favoris', favs), ...section('Récents', recents), ...(solo ? section('Sans serveur', [], solo) : [])];
+        lists.replaceChildren(...(cards.length || solo ? all : [h('div', { class: 'empty' },
+          h('h2', {}, 'Aucun serveur pour l\'instant'), h('p', { class: 'muted' }, 'Collez l\'adresse d\'un ami en haut, ou créez le vôtre.'),
+          h('div', { class: 'row' }, btn('Créer un serveur', () => { view = 'host'; render(); createHost(); }, 'primary')))]));
+        if (!chosen && cards.length) chosen = { address: [...own, ...favs, ...recents][0][0] };
+        updateDock();
         queryAll();
       }
-      for (const r of rows) r.update();
+      for (const c of cards) c.update();
+      solo?.classList.toggle('chosen', !!chosen?.solo);
     },
   };
+}
+
+function hexSpinner() {
+  const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('class', 'spin');
+  svg.setAttribute('viewBox', '0 0 32 32');
+  const ring = document.createElementNS(ns, 'path');
+  ring.setAttribute('d', 'M16 5l9.5 5.5v11L16 27l-9.5-5.5v-11z');
+  svg.append(ring);
+  [[16, 5], [25.5, 10.5], [25.5, 21.5], [16, 27], [6.5, 21.5], [6.5, 10.5]].forEach(([x, y], i) => {
+    const c = document.createElementNS(ns, 'circle');
+    for (const [k, v] of [['cx', x], ['cy', y], ['r', 3], ['opacity', 1 - i * 0.14]]) c.setAttribute(k, v);
+    svg.append(c);
+  });
+  return svg;
 }
 
 function connectingScreen() {
   const text = h('p', { class: 'muted' });
   return {
-    el: h('div', { class: 'center' }, h('div', { class: 'spin' }), h('h1', {}, 'Connexion…'), text, btn('Annuler', () => act(() => post('/api/disconnect')))),
+    el: h('div', { class: 'center' }, hexSpinner(), h('h1', {}, 'Connexion…'), text, btn('Annuler', () => act(() => post('/api/disconnect')))),
     update() {
-      text.textContent = state.session.adapter === 'victory' ? 'En attente de VIctory, puis du serveur.' : state.session.address ?? '';
+      text.textContent = state.session.address ?? '';
     },
   };
 }
@@ -245,21 +399,41 @@ function drawRadar(canvas, { local, players, id }) {
   g.clearRect(0, 0, size, size);
   g.strokeStyle = color('--line');
   g.lineWidth = devicePixelRatio;
-  for (const r of [0.3, 0.6, 0.9]) { g.beginPath(); g.arc(c, c, c * r, 0, 7); g.stroke(); }
+  for (const r of [0.3, 0.6, 0.9]) {
+    g.beginPath();
+    for (let k = 0; k < 6; k++) g.lineTo(c + c * r * Math.sin(k * Math.PI / 3), c - c * r * Math.cos(k * Math.PI / 3));
+    g.closePath();
+    g.stroke();
+  }
   const me = local ?? { x: 0, y: 0 };
   const others = players.filter((p) => p.id !== id);
   const range = Math.max(50, ...others.map((p) => Math.hypot(p.pos.x - me.x, p.pos.y - me.y)));
   const plot = (x, y, fill) => { g.fillStyle = fill; g.beginPath(); g.arc(x, y, 5 * devicePixelRatio, 0, 7); g.fill(); };
-  for (const p of others) plot(c + ((p.pos.x - me.x) / range) * c * 0.9, c - ((p.pos.y - me.y) / range) * c * 0.9, color('--text'));
+  g.font = `${11 * devicePixelRatio}px "Segoe UI", sans-serif`;
+  g.textAlign = 'center';
+  for (const p of others) {
+    const x = c + ((p.pos.x - me.x) / range) * c * 0.78, y = c - ((p.pos.y - me.y) / range) * c * 0.78;
+    plot(x, y, color('--text'));
+    g.fillStyle = color('--muted');
+    g.fillText(p.name, x, y - 9 * devicePixelRatio);
+  }
   if (local) plot(c, c, color('--accent'));
 }
 
 function sessionScreen() {
-  const title = h('h1'), sub = h('p', { class: 'muted' });
+  const title = h('h1'), sub = h('p', { class: 'muted' }), face = h('span');
   const log = h('div', { class: 'chat-log', role: 'log', 'aria-live': 'polite' });
   const input = h('input', { placeholder: 'Écrire un message', 'aria-label': 'Message', maxLength: 200, autocomplete: 'off' });
-  const players = h('div', { class: 'list' }), count = h('h2');
+  const players = h('div', { class: 'list' }), count = h('h2'), bar = gameBar();
+  const hint = h('p', { class: 'note', hidden: true });
   const radar = h('canvas', { class: 'radar', role: 'img', 'aria-label': 'Position des autres joueurs autour de vous' });
+  /** « Nom: texte » d'un joueur présent devient une bulle ; le reste est un message du serveur. */
+  const line = (text) => {
+    const at = text.indexOf(': '), who = at > 0 ? text.slice(0, at) : '';
+    const me = state.settings.name;
+    if (!who || (who !== me && !state.session.roster.some((p) => p.name === who))) return h('div', { class: 'msg sys' }, text);
+    return h('div', { class: 'msg' }, avatar(who, who === me ? 'small mine' : 'small'), h('div', { class: 'grow' }, h('b', {}, who), text.slice(at + 2)));
+  };
   const send = (e) => {
     e.preventDefault();
     const text = input.value.trim();
@@ -269,24 +443,29 @@ function sessionScreen() {
   let seen = -1, names = '';
   return {
     el: h('div', {},
-      h('div', { class: 'head' }, h('div', { class: 'grow' }, title, sub), btn('Quitter le serveur', () => act(() => post('/api/disconnect')), 'danger')),
-      h('div', { class: 'session' },
-        h('div', { class: 'card chat' }, log, h('form', { onsubmit: send }, input, h('button', { class: 'btn primary' }, 'Envoyer'))),
-        h('div', {}, radar, count, players))),
+      h('div', { class: 'head' }, h('div', { class: 'srv-top grow' }, face, h('div', { class: 'grow' }, title, sub)), btn('Quitter', () => act(() => post('/api/disconnect')), 'danger')),
+      hint, bar.el,
+      h('div', { class: 'session gap' },
+        h('div', { class: 'card chat' }, log, h('form', { onsubmit: send }, input, h('button', { class: 'btn primary icon', 'aria-label': 'Envoyer' }, icon('send')))),
+        h('div', { class: 'stack' }, radar, count, players))),
     update() {
       const { session: s, settings } = state;
-      title.textContent = s.serverName || s.address;
-      sub.textContent = `${s.address} · ${modeName(s.adapter)}`;
+      bar.update();
+      hint.hidden = s.adapter !== 'victory';
+      hint.textContent = `Dans le jeu : F8 pour écrire, F9 pour masquer.${s.local ? '' : ' Votre position n\'est pas lue dans le jeu : les autres voient votre nom et vos messages, pas votre personnage.'}`;
+      const server = s.serverName || s.address;
+      if (title.textContent !== server) { title.textContent = server; face.replaceChildren(avatar(server, 'big')); }
+      sub.textContent = `${s.address} · ${s.adapter === 'victory' ? 'VIctory' : 'Démo, sans jeu'}`;
       const end = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
-      for (const l of s.log) if (l.seq > seen) { log.append(h('div', {}, l.text)); seen = l.seq; }
+      for (const l of s.log) if (l.seq > seen) { log.append(line(l.text)); seen = l.seq; }
       while (log.childElementCount > 200) log.firstChild.remove();
       if (end) log.scrollTop = log.scrollHeight;
-      const list = [{ id: s.id, name: settings.name, me: true }, ...s.players.filter((p) => p.id !== s.id)];
+      const list = [{ id: s.id, name: settings.name, me: true }, ...s.roster.filter((p) => p.id !== s.id)];
       const next = list.map((p) => `${p.id}:${p.name}`).join();
       if (next !== names) {
         names = next;
-        count.textContent = `Joueurs visibles (${list.length})`;
-        players.replaceChildren(...list.map((p) => h('div', { class: 'item' }, h('span', { class: `dot ${p.me ? 'on' : ''}` }), h('span', { class: 'title' }, p.name), p.me && h('span', { class: 'tag' }, 'vous'))));
+        count.textContent = `Joueurs (${list.length})`;
+        players.replaceChildren(...list.map((p) => h('div', { class: 'item' }, avatar(p.name, p.me ? 'small mine' : 'small'), h('span', { class: 'title grow' }, p.name), p.me && h('span', { class: 'tag' }, 'vous'))));
       }
       drawRadar(radar, s);
     },
@@ -296,7 +475,7 @@ function sessionScreen() {
 // --- Héberger ---------------------------------------------------------------------------------
 
 const STATUS = { stopped: 'Arrêté', starting: 'Démarrage…', running: 'En ligne', stopping: 'Arrêt…', failed: 'En erreur' };
-const statusDot = (s) => `dot ${s === 'running' ? 'on' : s === 'failed' ? 'bad' : ''}`;
+const statusClass = (s) => (s === 'running' ? 'on' : s === 'failed' ? 'bad' : '');
 
 async function download(id, name) {
   await act(async () => {
@@ -350,21 +529,23 @@ async function createHost() {
 function hostsScreen() {
   const list = h('div');
   let shape = '';
+  const choice = (name, title, text, button) => h('div', { class: 'card choice' }, h('div', { class: 'ico' }, icon(name)), h('h2', {}, title), h('p', { class: 'muted' }, text), button);
   return {
     el: h('div', {},
-      h('div', { class: 'head' }, h('div', {}, h('h1', {}, 'Héberger un serveur'), h('p', { class: 'muted' }, 'Sur ce PC pour jouer tout de suite, ou ailleurs pour qu\'il reste allumé.'))),
+      h('div', { class: 'head' }, h('div', {}, h('h1', {}, 'Hébergez votre serveur'), h('p', { class: 'muted' }, 'Vos règles, vos mods, vos joueurs.'))),
       list,
       h('div', { class: 'choices' },
-        h('div', { class: 'card' }, h('h2', {}, 'Sur ce PC'), h('p', { class: 'muted' }, 'Le serveur tourne tant que SixM est ouvert.'), btn('Créer un serveur', createHost, 'primary')),
-        h('div', { class: 'card' }, h('h2', {}, 'Sur un hébergement'), h('p', { class: 'muted' }, 'Un zip à déposer sur un VPS, un autre PC ou Docker. Il faut seulement Node.js.'), btn('Télécharger le serveur', () => download(undefined, 'SixM-Server.zip'))))),
+        choice('pc', 'Sur ce PC', 'Prêt en deux clics. Il tourne tant que SixM est ouvert.', btn('Créer un serveur', createHost, 'primary')),
+        choice('box', 'Sur un hébergement', 'Un zip pour un VPS, un autre PC ou Docker. Il faut seulement Node.js.', iconBtn('down', 'Télécharger le serveur', () => download(undefined, 'SixM-Server.zip'))))),
     update() {
       const next = JSON.stringify(state.hosts.map(({ id, name, status, port, mods }) => [id, name, status, port, mods]));
       if (next === shape) return;
       shape = next;
-      list.replaceChildren(...(state.hosts.length ? [h('div', { class: 'list' }, state.hosts.map((x) => h('div', { class: 'item' },
-        h('span', { class: statusDot(x.status) }),
-        h('div', { class: 'grow' }, h('div', { class: 'title' }, x.name), h('div', { class: 'sub' }, x.broken ? 'server.json invalide' : `${STATUS[x.status]} · port ${x.port} · ${x.mods.filter((m) => m.enabled).length} mod(s)`)),
-        btn('Gérer', () => { hostId = x.id; hostTab = x.status === 'running' ? 'console' : 'mods'; render(); })))), h('div', { class: 'gap' })] : []));
+      const open = (x) => { hostId = x.id; hostTab = x.status === 'running' ? 'console' : 'mods'; render(); };
+      list.replaceChildren(...(state.hosts.length ? [h('div', { class: 'grid' }, state.hosts.map((x) => h('article', { class: 'card srv' },
+        h('div', { class: 'srv-top' }, avatar(x.name, 'big'), h('div', { class: 'grow' }, h('button', { type: 'button', class: 'hit', onclick: () => open(x) }, x.name),
+          h('div', { class: 'sub' }, x.broken ? 'server.json invalide' : `Port ${x.port} · ${x.mods.filter((m) => m.enabled).length} mod(s)`))),
+        h('div', { class: 'srv-foot' }, h('span', { class: `pill ${statusClass(x.status)}` }, h('span', { class: `dot ${statusClass(x.status)}` }), STATUS[x.status]))))), h('div', { class: 'section' }, h('h2', {}, 'Nouveau serveur'))] : []));
     },
   };
 }
@@ -372,7 +553,8 @@ function hostsScreen() {
 function hostScreen() {
   const id = hostId;
   const get = () => state.hosts.find((x) => x.id === id);
-  const dot = h('span', { class: 'dot' }), title = h('span'), sub = h('p', { class: 'muted' });
+  const dot = h('span'), title = h('h1'), sub = h('p', { class: 'muted row' }), face = h('span'), word = h('span'), pill = h('span', { class: 'pill' }, dot, word), port = h('span');
+  sub.append(pill, port);
   const power = btn('', () => act(() => post(`/api/hosts/${['running', 'starting'].includes(get().status) ? 'stop' : 'start'}`, { id })), 'primary');
   const playHere = btn('Jouer dessus', () => { view = 'play'; act(() => post('/api/hosts/play', { id })); });
   const stale = h('p', { class: 'note', hidden: true }, 'Réglages modifiés : arrêtez puis démarrez le serveur pour les appliquer.');
@@ -381,17 +563,19 @@ function hostScreen() {
   const broken = get().broken;
   return {
     el: h('div', {},
-      btn('← Mes serveurs', () => { hostId = null; render(); }, 'quiet back'),
-      h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, dot, ' ', title), sub), h('div', { class: 'row' }, playHere, power)),
+      iconBtn('back', 'Mes serveurs', () => { hostId = null; render(); }, 'quiet'),
+      h('div', { class: 'head gap' }, h('div', { class: 'srv-top grow' }, face, h('div', { class: 'grow' }, title, sub)), h('div', { class: 'row' }, playHere, power)),
       stale,
       broken ? h('p', { class: 'note error' }, broken) : [
         h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, t]) => h('button', { type: 'button', role: 'tab', 'aria-selected': String(k === hostTab), onclick: () => { hostTab = k; render(); } }, t))),
         body.el]),
     update() {
       const x = get();
-      dot.className = statusDot(x.status);
-      title.textContent = x.name;
-      sub.textContent = `${STATUS[x.status]}${x.port ? ` · port ${x.port}` : ''}`;
+      dot.className = `dot ${statusClass(x.status)}`;
+      pill.className = `pill ${statusClass(x.status)}`;
+      word.textContent = STATUS[x.status];
+      if (title.textContent !== x.name) { title.textContent = x.name; face.replaceChildren(avatar(x.name, 'big')); }
+      port.textContent = x.port ? `Port ${x.port}` : '';
       const on = ['running', 'starting'].includes(x.status);
       power.textContent = on ? 'Arrêter' : 'Démarrer';
       power.className = `btn ${on ? 'danger' : 'primary'}`;
@@ -444,7 +628,7 @@ function modsTab(id) {
     ondragover: (e) => { e.preventDefault(); drop.classList.add('over'); },
     ondragleave: () => drop.classList.remove('over'),
     ondrop: (e) => { e.preventDefault(); drop.classList.remove('over'); install(e.dataTransfer.files[0]); },
-  }, h('p', {}, 'Déposez ici le zip d\'un mod'), h('p', { class: 'small muted' }, 'Les joueurs le reçoivent automatiquement en se connectant.'),
+  }, icon('box'), h('h2', {}, 'Déposez un mod ici'), h('p', { class: 'small muted' }, 'Un fichier .zip. Les joueurs le reçoivent en se connectant.'),
   h('div', { class: 'row' }, btn('Choisir un zip', () => file.click()), btn('Ouvrir le dossier des mods', () => act(() => post('/api/hosts/open', { id })), 'quiet')), file);
   let shape = null;
   return {
@@ -471,7 +655,7 @@ function hostSettingsTab(id, get) {
   const remove = h('input', { type: 'checkbox', class: 'switch', role: 'switch', 'aria-label': 'Retirer le mot de passe' });
   return {
     el: h('form', {
-      class: 'form', onsubmit: async (e) => {
+      class: 'card form', onsubmit: async (e) => {
         e.preventDefault();
         if (await act(() => post('/api/hosts/update', { id, ...value(), ...(remove.checked && { password: '' }) }))) {
           toast('Réglages enregistrés');
@@ -492,13 +676,13 @@ function shareTab(id, get) {
   const copy = (text) => act(async () => { await navigator.clipboard.writeText(text); toast('Adresse copiée'); });
   const row = (label, address) => h('div', { class: 'item' }, h('div', { class: 'grow' }, h('div', { class: 'title' }, address), h('div', { class: 'sub' }, label)), btn('Copier', () => copy(address)));
   return {
-    el: h('div', {},
+    el: h('div', { class: 'stack' },
       h('div', { class: 'list' }, row('Sur ce PC', `localhost:${port}`), state.lan && row('Sur votre réseau local', `${state.lan}:${port}`)),
-      h('h2', {}, 'Par Internet'),
-      h('p', { class: 'muted' }, `Ouvrez le port TCP ${port} dans le pare-feu et sur votre box, puis donnez votre IP publique. La connexion n'est pas chiffrée, mot de passe compris.`),
-      h('h2', {}, 'Déplacer sur un hébergement'),
+      h('div', { class: 'card form' }, h('h2', {}, 'Par Internet'),
+      h('p', { class: 'muted' }, `Ouvrez le port TCP ${port} dans le pare-feu et sur votre box, puis donnez votre IP publique. La connexion n'est pas chiffrée, mot de passe compris.`)),
+      h('div', { class: 'card form' }, h('h2', {}, 'Déplacer sur un hébergement'),
       h('p', { class: 'muted' }, 'Le zip contient ce serveur, ses réglages (mot de passe compris) et ses mods. Sur la machine : start.bat, start.sh ou Docker.'),
-      h('div', { class: 'row gap' }, btn('Télécharger ce serveur', () => download(id, `${id}.zip`), 'primary'))),
+      h('div', {}, iconBtn('down', 'Télécharger ce serveur', () => download(id, `${id}.zip`), 'primary')))),
   };
 }
 
@@ -507,27 +691,60 @@ function shareTab(id, get) {
 function settingsScreen() {
   const { settings } = state;
   const name = h('input', { value: settings.name, maxLength: 24, required: true, autocomplete: 'off' });
-  const radio = (value, title, text) => h('label', { class: 'item' },
-    h('input', { type: 'radio', name: 'adapter', value, checked: settings.adapter === value, class: 'radio' }),
-    h('div', { class: 'grow' }, h('div', { class: 'title' }, title), h('div', { class: 'small muted' }, text)));
+  const pathRow = (label, value, title, folder = false) => {
+    const input = h('input', { value, spellcheck: false, autocomplete: 'off', placeholder: folder ? 'C:\\…\\dossier' : 'C:\\…\\fichier.exe' });
+    const browse = btn('Parcourir', () => act(async () => {
+      browse.disabled = true;
+      try { const { file } = await post('/api/pick', { title, folder }); if (file) input.value = file; } finally { browse.disabled = false; }
+    }));
+    browse.hidden = !state.linkSupported;
+    return { input, el: field(label, h('div', { class: 'join' }, input, browse)) };
+  };
+  const section = (title, text, ...body) => h('section', { class: 'card' }, h('header', {}, h('h2', {}, title), text && h('p', { class: 'muted small' }, text)), ...body);
+  const victory = pathRow('Emplacement de victory.exe', settings.victory, 'Choisir victory.exe');
+  const games = settings.games.map((g) => ({ ...g }));
+  const rows = h('div', { class: 'form' });
+  let inputs = [];
+  const collect = () => inputs.map((r) => ({ id: r.id, name: r.name.value, path: r.path.input.value, console: r.console.value }));
+  const draw = (list) => {
+    inputs = list.map((g) => ({
+      id: g.id,
+      name: h('input', { value: g.name, maxLength: 40, placeholder: 'Nom', autocomplete: 'off' }),
+      path: pathRow('Dossier du jeu', g.path, 'Choisir le dossier du jeu extrait de votre disque', true),
+      console: h('select', {}, h('option', { value: 'series-x' }, 'Series X'), h('option', { value: 'series-s' }, 'Series S')),
+    }));
+    inputs.forEach((r, i) => { r.console.value = list[i].console ?? 'series-x'; });
+    rows.replaceChildren(...inputs.map((r, i) => h('div', { class: 'game' },
+      h('div', { class: 'cols' }, field('Nom', r.name), field('Version console', r.console)), r.path.el,
+      h('div', {}, btn('Retirer', () => { const l = collect(); l.splice(i, 1); draw(l); }, 'quiet')))));
+  };
+  draw(games);
   return {
-    el: h('div', {},
-      h('div', { class: 'head' }, h('h1', {}, 'Réglages')),
+    el: h('div', { class: 'settings' },
+      h('h1', {}, 'Réglages'),
       h('form', {
         class: 'form', onsubmit: async (e) => {
           e.preventDefault();
-          const adapter = new FormData(e.target).get('adapter');
-          if (await act(() => post('/api/settings', { name: name.value, adapter }))) toast('Réglages enregistrés');
+          const unquote = (p) => p.trim().replace(/^"|"$/g, '');
+          const list = collect().map((g) => ({ ...g, path: unquote(g.path) }));
+          const known = new Set(state.settings.games.map((g) => g.id));
+          if (!await act(() => post('/api/settings', { name: name.value, victory: unquote(victory.input.value), games: list }))) return;
+          // Un jeu tout juste ajouté devient le jeu choisi.
+          const added = state.settings.games.find((g) => !known.has(g.id));
+          if (added) await act(() => post('/api/settings', { target: added.id }));
+          toast('Réglages enregistrés');
+          for (const g of list) if (g.path) await act(() => post('/api/game/check', { path: g.path })); // signale un dossier incomplet
+          screen.key = null;
+          render();
         },
       },
-      field('Pseudo', name),
-      h('div', {}, h('h2', {}, 'Mode de jeu'), h('div', { class: 'list' },
-        radio('mock', 'Démo, sans jeu', 'Chat, joueurs et radar dans cette fenêtre. Fonctionne partout.'),
-        radio('victory', 'VIctory', 'Relie SixM au jeu. Demande un bridge dans VIctory, qui n\'existe pas encore.'))),
-      h('div', {}, h('button', { class: 'btn primary' }, 'Enregistrer'))),
-      h('h2', {}, 'Fermer SixM'),
-      h('p', { class: 'muted' }, 'Quitte le serveur en cours et arrête ceux hébergés sur ce PC.'),
-      h('div', { class: 'row gap' }, btn('Fermer SixM', () => act(() => post('/api/quit')), 'danger'))),
+      section('Profil', null, field('Pseudo', name)),
+      section('Jeux', 'Le dossier extrait de votre propre disque. SixM y trouve le programme du jeu et ne modifie rien.', rows,
+        h('div', {}, btn('Ajouter un jeu', () => draw([...collect(), { name: '', path: '', console: 'series-x' }])))),
+      section('VIctory', 'SixM lance le VIctory installé sur ce PC. Il ne le fournit pas.', victory.el),
+      h('div', { class: 'save' }, h('button', { class: 'btn primary' }, 'Enregistrer'))),
+      section('Fermer SixM', 'Quitte le serveur en cours et arrête ceux hébergés sur ce PC. Le jeu reste ouvert.',
+        h('div', {}, btn('Fermer SixM', () => act(() => post('/api/quit')), 'danger')))),
   };
 }
 

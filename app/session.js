@@ -19,6 +19,7 @@ export class Session {
     this.error = null;
     this.address = null;
     this.adapterName = null;
+    this.adapter = null;
   }
 
   connect({ address, name, password, adapter: adapterName }) {
@@ -27,7 +28,7 @@ export class Session {
     const adapter = createAdapter(adapterName, this.adapterOptions);
     this.#reset('connecting');
     this.attempt++;
-    Object.assign(this, { address, adapterName });
+    Object.assign(this, { address, adapterName, adapter });
     adapter.log = this.#recorder();
     const client = this.client = new SixMClient({
       url, name, password, adapter,
@@ -38,17 +39,19 @@ export class Session {
       },
     });
     // Pas d'attente ici : l'interface suit l'état (le bridge VIctory peut mettre du temps à répondre).
-    return client.connect().then(() => {
-      if (this.client !== client) return client.disconnect(); // annulé entre-temps
+    return client.connect().then(async () => {
+      if (this.client !== client) { await client.disconnect(); return false; } // annulé entre-temps
       this.status = 'connected';
+      return true;
     }, (e) => {
       if (this.client === client) this.#end(this.#explain(e));
+      return false;
     });
   }
 
-  async disconnect() {
+  async disconnect(error = null) {
     const { client } = this;
-    this.#reset('idle');
+    if (error) this.#end(error); else this.#reset('idle');
     await client?.disconnect();
   }
 
@@ -66,9 +69,13 @@ export class Session {
       serverName: connected ? client.serverName : null,
       id: connected ? client.id : null,
       local: connected ? client.adapter.getLocalPlayerPosition() : null,
-      players: connected ? client.players.map((p) => ({ id: p.id, name: p.name, pos: p.pos })) : [],
+      players: connected ? client.players : [],
+      roster: connected ? client.roster : [],
     };
   }
+
+  /** Attache la surcouche à la fenêtre d'un processus. */
+  setTarget(pid) { this.adapter?.setTarget?.(pid); }
 
   #end(error) {
     const { address } = this;
@@ -88,7 +95,7 @@ export class Session {
 
   #explain(e) {
     if (this.adapterName === 'victory' && e.port === (this.adapterOptions.port ?? 30121))
-      return 'VIctory ne répond pas : le bridge SixM n\'est pas lancé. Choisissez le mode Démo pour essayer sans jeu.';
+      return 'le lien avec VIctory ne répond pas';
     if (e.code === 'ECONNREFUSED' || e.errors?.some((x) => x.code === 'ECONNREFUSED')) return 'aucun serveur à cette adresse';
     if (e.code === 'ENOTFOUND') return 'adresse introuvable';
     if (e.code === 'ETIMEDOUT') return 'le serveur ne répond pas';
