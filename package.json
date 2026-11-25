@@ -13,7 +13,8 @@
     "bot": "node client/bot.js",
     "sim-bridge": "node integrations/victory/sim-bridge.js",
     "test": "node --test \"test/*.test.js\"",
-    "package": "node packaging/build.mjs"
+    "package": "node packaging/build.mjs",
+    "readme": "node scripts/readme.mjs"
   },
   "dependencies": {
     "quickjs-emscripten": "^0.32.0",

@@ -1,50 +1,96 @@
-**English** · [Français](README.fr.md) · [Español](README.es.md) · [Deutsch](README.de.md) · [Português](README.pt-BR.md) · [中文](README.zh-CN.md) · [日本語](README.ja.md) · [Русский](README.ru.md)
+<!-- Généré par scripts/readme.mjs : modifiez ce fichier-là, puis npm run readme -->
+<div align="center">
+
+<img src="app/ui/favicon.svg" width="96" height="96" alt="SixM">
 
 # SixM
 
-Framework multijoueur / modding **agnostique du jeu**, dans l'esprit de FiveM, pensé pour GTA VI sur PC et les projets de portage. Tout le code est original.
+**Le multijoueur, les mods et vos serveurs, dans un seul launcher.**
 
-## État (v0.2)
+<a href="README.md">English</a> · <b>Français</b> · <a href="README.es.md">Español</a> · <a href="README.de.md">Deutsch</a> · <a href="README.pt-BR.md">Português</a> · <a href="README.zh-CN.md">中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.ru.md">Русский</a>
 
-| Brique | Statut |
+[![Release](https://img.shields.io/github/v/release/SyanCode/SixM?label=release&color=f6b83c)](https://github.com/SyanCode/SixM/releases/latest)
+[![Tests](https://img.shields.io/github/actions/workflow/status/SyanCode/SixM/release.yml?branch=main&label=tests)](https://github.com/SyanCode/SixM/actions)
+
+### [Télécharger pour Windows](https://github.com/SyanCode/SixM/releases/latest)
+
+<img src="docs/images/play.jpg" width="49%" alt="Jouer"> <img src="docs/images/host.jpg" width="49%" alt="Héberger">
+
+</div>
+
+SixM est un framework multijoueur et modding agnostique du jeu, dans l'esprit de FiveM, pensé pour GTA VI sur PC via des projets de portage comme [VIctory](https://github.com/Marvisak/VIctory). Tout le code est original.
+
+## Fonctionnalités
+
+| | |
 |---|---|
-| Serveur dédié (WebSocket, tick, snapshots, rate-limit) | ✅ |
-| Système de ressources (`resource.json`, start/stop/restart, scripts serveur + client) | ✅ |
-| API de script (`sixm.on`, `onNet`, `emitClient`, `emitAllClients`, `getPlayers`, `kick`) | ✅ |
-| Hébergement (`sixm init` / `start`, mot de passe, bans, console, `info.json`) | ✅ |
-| Launcher VIctory et surcouche en jeu (Windows) : chat, joueurs, radar | ✅ testé avec un faux VIctory |
-| Installation et compilation de VIctory depuis l'interface (commit épinglé, mise à jour manuelle) | ✅ |
-| Position et personnages des autres joueurs dans le jeu | ⛔ demande un module dans VIctory |
-| Interface client : jouer, héberger, mods, serveur à télécharger | ✅ |
-| Scripts client isolés dans QuickJS/WebAssembly | ✅ |
-| Client de référence + adaptateur simulé + bot de test | ✅ |
-| **Adaptateur pour un vrai jeu** (`GameAdapter`) | ⛔ à écrire, voir ci-dessous |
+| **Jouer** | Choisissez un jeu et un serveur, puis Jouer. Favoris, chat, joueurs, radar. Un mode démo marche sans jeu. |
+| **VIctory** | Télécharge et compile VIctory sur votre PC, à une version précise, avec journal en direct. Mise à jour toujours manuelle. |
+| **Surcouche en jeu** | Chat, joueurs et radar par-dessus la fenêtre du jeu. F8 pour écrire, F9 pour masquer. Windows seulement. |
+| **Héberger** | Votre serveur en deux clics : mot de passe, bannissements, console, réglages. |
+| **Mods** | Déposez un zip, activez-le. Les joueurs le reçoivent en se connectant. |
+| **Sécurité** | Les scripts envoyés par un serveur tournent isolés dans QuickJS/WebAssembly. |
+
+## Télécharger
+
+| Fichier | Pour |
+|---|---|
+| `SixM-Setup` | Installateur. Node.js inclus, sans droits d'administrateur |
+| `SixM-portable` | Sans installation : lancez `SixM.exe` |
+| `SixM-Server` | Serveur seul, pour un hébergement. Demande [Node.js](https://nodejs.org) |
+
+Le programme n'est pas signé : Windows SmartScreen peut afficher un avertissement. `SHA256SUMS.txt` donne les empreintes des fichiers.
+
+Depuis le code : `SixM.bat` sous Windows, sinon `npm install` puis `npm run app`. Demande [Node.js](https://nodejs.org) 20.15 ou plus.
 
 ## Démarrage
 
-Windows : téléchargez `SixM-Setup` dans les [versions](https://github.com/SyanCode/SixM/releases) (Node.js inclus, sans droits d'administrateur). Le programme n'est pas signé : SmartScreen peut avertir. Depuis le code : `SixM.bat` ([Node.js](https://nodejs.org) requis). Ailleurs : `npm install` puis `npm run app`.
+1. Installez SixM et ouvrez-le.
+2. **Réglages** : installez VIctory, puis ajoutez le dossier du jeu extrait de votre propre disque.
+3. **Jouer** : choisissez un serveur et cliquez sur Jouer. Pas de jeu ? Gardez le mode démo.
 
-- **Jouer** : choisissez l'installation du jeu et le serveur ; SixM lance [VIctory](https://github.com/Marvisak/VIctory) puis ajoute chat et joueurs par-dessus (F8 écrire, F9 masquer). Mode démo sans jeu.
-- **Réglages** : chemin de `victory.exe` et dossier du jeu extrait de votre disque. SixM ne fournit ni VIctory ni le jeu.
-- **Héberger** : serveur sur ce PC en deux clics, mods par glisser-déposer d'un zip.
-- **Télécharger le serveur** : zip autonome pour un VPS, un autre PC ou Docker.
+## Héberger un serveur
 
-En ligne de commande :
+Dans l'application : **Héberger → Créer un serveur**. Pour qu'il reste en ligne, **Télécharger le serveur** donne un zip pour un VPS, un autre PC ou Docker. En ligne de commande :
 
 ```bash
 npm install
-node bin/sixm.js init ../mon-serveur  # créer son serveur, puis : node bin/sixm.js start ../mon-serveur
-npm start          # serveur de démo sur ws://localhost:30120
-npm run bot        # (autre terminal) un bot qui se déplace et parle
-npm test
+node bin/sixm.js init ../my-server
+node bin/sixm.js start ../my-server
 ```
 
-Héberger : [docs/HOSTING.md](docs/HOSTING.md). Console serveur : tapez `help`.
+## État
 
-## Ce que SixM ne fait pas (et pourquoi)
+| ✅ Fonctionne | ⛔ Pas encore |
+|---|---|
+| Serveurs, mods, interface et chat | Personnages et positions des autres joueurs dans le jeu : demande un module dans VIctory |
+| Lancement de VIctory et surcouche, testés avec un faux VIctory | VIctory lui-même n'est pas encore jouable, selon ses auteurs |
+| VIctory compilé et vérifié, sans jeu | Interface en français seulement ; pas de chiffrement sans proxy TLS |
 
-- **GTA VI n'a pas de version PC officielle ni de support de mods** : il n'existe donc aucun point d'accroche légitime. `client/adapter.js` définit le contrat à implémenter le jour où il y en a un (API officielle, ou projet de portage qui autorise explicitement les plugins).
-- Le dépôt **ne contient ni n'utilisera** de code, d'assets ou de binaires Rockstar, ni de fuites ou de builds piratés. Ne les ajoutez pas.
-- Les scripts **serveur** tournent dans `node:vm`, ce qui **n'est pas** une sandbox de sécurité : l'hébergeur ne doit installer que des ressources de confiance.
+## Ce que SixM ne fait pas
 
-Voir [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) et [docs/PROTOCOL.md](docs/PROTOCOL.md).
+- Il **ne fournit ni jeu ni code de VIctory** et ne modifie aucun fichier du jeu. Utilisez votre propre copie.
+- Ni code ni assets Rockstar, ni fuites, ni builds piratés dans ce dépôt. N'en ajoutez pas.
+- Les scripts **serveur** ont accès à la machine qui les héberge : n'installez que des mods de confiance.
+
+## Développement
+
+```bash
+npm test
+npm run bot
+npm run sim-bridge
+npm run package
+```
+
+Tests, empaquetage et publication sont automatiques : changer la version dans `package.json` publie une version.
+
+## Documentation
+
+- [Hébergement et mods](docs/HOSTING.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Protocole réseau](docs/PROTOCOL.md)
+- [Bridge VIctory](integrations/victory/PROTOCOL.md)
+
+---
+
+<div align="center"><sub>Projet indépendant, sans lien avec Rockstar Games, Take-Two ou VIctory.</sub></div>

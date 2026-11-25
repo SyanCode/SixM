@@ -2,3 +2,5 @@
 *.sh text eol=lf
 *.ico binary
 *.yml text eol=lf
+*.jpg binary
+README*.md text eol=lf
