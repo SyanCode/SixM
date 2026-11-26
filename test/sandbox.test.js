@@ -80,7 +80,8 @@ test('sandbox : erreur dans un handler, les autres tournent ; débit borné', as
   assert.equal(alive, true);
   assert.deepEqual(logs, ['erreur: Error: boum', 'suite']);
 
-  // 100 appels par fenêtre d'une seconde : sur une machine lente, la boucle peut en chevaucher deux.
+  // 100 appels par fenêtre d'une seconde, la première ouverte au premier appel. Une boucle plus longue
+  // qu'une seconde (machine très lente) en ouvre une autre.
   const start = performance.now();
   const flood = await run('for (let i = 0; i < 5000; i++) sixm.log("x")');
   const windows = Math.floor((performance.now() - start) / 1000) + 1;

@@ -55,7 +55,7 @@ export class ScriptSandbox {
     this.limits = { ...LIMITS, ...limits };
     this.resources = new Map(); // nom -> { runtime, ctx, dispatch }
     this.deadline = 0;
-    this.calls = { start: 0, n: 0 };
+    this.calls = { start: -Infinity, n: 0 }; // la première fenêtre commence au premier appel
   }
 
   /** bundle : [{ name, files: [{ file, source }] }] tel que reçu du serveur. */
