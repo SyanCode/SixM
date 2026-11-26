@@ -1,7 +1,8 @@
 # Menus des mods
 
-Un mod serveur décrit ses menus en JSON ; SixM les dessine (fenêtre de SixM, touche **M** en partie) et renvoie les
-choix du joueur. Le joueur navigue avec les flèches, Entrée, Retour arrière ; la souris marche aussi.
+Un mod serveur décrit ses menus en JSON ; SixM les dessine et renvoie les choix du joueur :
+- dans la fenêtre de SixM, touche **M** en partie (souris aussi) ;
+- dans le jeu, par la surcouche de SixM Link (Windows), touche **F7**. Flèches, Entrée, Retour arrière.
 
 ## Le menu principal
 Chaque mod y ajoute ses entrées. `open` construit le menu pour ce joueur ; `visible` le réserve à certains.

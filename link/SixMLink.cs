@@ -1,7 +1,7 @@
 // SixM Link : relie SixM à VIctory sans modifier ni l'un ni l'autre.
 //
 // Côté SixM, il joue le rôle du bridge (integrations/victory/PROTOCOL.md) sur 127.0.0.1.
-// Côté jeu, il dessine une surcouche (chat, joueurs, radar) au-dessus de la fenêtre de VIctory.
+// Côté jeu, il dessine une surcouche (chat, joueurs, radar, menus des mods) au-dessus de la fenêtre de VIctory.
 // Il ne lit et n'écrit jamais la mémoire du jeu : la position du joueur lui est donc inconnue.
 //
 // Compilé sur la machine par client/link.js avec le csc.exe de Windows (C# 5).
@@ -28,6 +28,8 @@ static class Program
     [STAThread]
     static int Main(string[] args)
     {
+        // Rendu seul, sans fenêtre ni appel à Windows : marche aussi sous Mono.
+        if (args.Length == 3 && args[0] == "--render-menu") return RenderMenu(args[1], args[2]);
         Native.SetProcessDPIAware();
         Application.EnableVisualStyles();
         // Programme sans console : Console.OutputEncoding échouerait, on ouvre les flux nous-mêmes.
@@ -36,9 +38,18 @@ static class Program
         if (args.Length == 2 && args[0] == "--pick") return Pick(args[1]);
         if (args.Length == 2 && args[0] == "--pick-folder") return PickFolder(args[1]);
         int port;
-        if (args.Length != 2 || args[0] != "--serve" || !int.TryParse(args[1], out port)) return 2;
+        bool demo = args.Length == 3 && args[2] == "--demo";
+        if ((args.Length != 2 && !demo) || args[0] != "--serve" || !int.TryParse(args[1], out port)) return 2;
 
         Bridge bridge = new Bridge();
+        // Démo : une fausse fenêtre de jeu, pour voir la surcouche sans lancer le jeu.
+        if (demo)
+        {
+            DemoWindow window = new DemoWindow();
+            window.Show();
+            bridge.DefaultTarget = System.Diagnostics.Process.GetCurrentProcess().Id;
+            bridge.TargetPid = bridge.DefaultTarget;
+        }
         try { port = bridge.Start(port); }
         catch (SocketException e)
         {
@@ -60,6 +71,19 @@ static class Program
         input.Start();
         Out.WriteLine("ready " + port);
         Application.Run();
+        return 0;
+    }
+
+    /// Dessine un menu décrit en JSON ({"menu": {...}}) dans un PNG : tests et captures, sans jeu.
+    static int RenderMenu(string jsonFile, string png)
+    {
+        Dictionary<string, object> m = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(jsonFile, Encoding.UTF8));
+        object raw;
+        MenuData menu = MenuData.Parse(m.TryGetValue("menu", out raw) ? raw : null, 0);
+        if (menu == null) return 3;
+        object sel;
+        if (m.TryGetValue("select", out sel) && sel is int) menu.Sel = Math.Max(0, Math.Min(menu.Items.Count - 1, (int)sel));
+        using (Bitmap b = MenuPainter.Render(menu, 1)) b.Save(png, ImageFormat.Png);
         return 0;
     }
 
@@ -103,8 +127,9 @@ sealed class Bridge
     public readonly Dictionary<int, Remote> Remotes = new Dictionary<int, Remote>();
     public readonly List<string> Players = new List<string>();
     public readonly List<Line> Lines = new List<Line>();
+    public readonly List<MenuData> Menu = new List<MenuData>(); // pile des sous-menus, vide : fermé
     public string Server = "";
-    public int TargetPid;
+    public int TargetPid, DefaultTarget;
     public double[] View; // clip = m * (x, y, z, 1), par lignes
     public DateTime ViewAt;
     public bool HasSelf;
@@ -183,8 +208,8 @@ sealed class Bridge
 
     void Clear()
     {
-        Remotes.Clear(); Players.Clear(); Lines.Clear();
-        Server = ""; TargetPid = 0; View = null; HasSelf = false; Version++;
+        Remotes.Clear(); Players.Clear(); Lines.Clear(); Menu.Clear();
+        Server = ""; TargetPid = DefaultTarget; View = null; HasSelf = false; Version++;
     }
 
     bool Handle(Dictionary<string, object> m)
@@ -239,9 +264,75 @@ sealed class Bridge
                     SelfX = Num(m, "x"); SelfY = Num(m, "y"); SelfZ = Num(m, "z");
                     return false; // redessiné par Markers, pas par le panneau
                 }
-            case "target": TargetPid = (int)Num(m, "pid"); return true;
+            case "target": TargetPid = DefaultTarget != 0 ? DefaultTarget : (int)Num(m, "pid"); return true;
+            case "menu":
+                {
+                    object raw;
+                    MenuData d = MenuData.Parse(m.TryGetValue("menu", out raw) ? raw : null, 0);
+                    if (d == null) return false;
+                    Menu.Clear();
+                    Menu.Add(d);
+                    return true;
+                }
+            case "menuClose": Menu.Clear(); return true;
             default: return false;
         }
+    }
+
+    public const int KeyToggle = 0, KeyUp = 1, KeyDown = 2, KeyLeft = 3, KeyRight = 4, KeyEnter = 5, KeyBack = 6;
+
+    /// Touche du menu, prise au jeu : navigation locale, choix envoyés à SixM.
+    public void MenuKey(int k)
+    {
+        Dictionary<string, object> send = null;
+        lock (Lock)
+        {
+            if (k == KeyToggle)
+            {
+                if (Menu.Count == 0) { send = new Dictionary<string, object>(); send["t"] = "menuOpen"; }
+                else { Menu.Clear(); send = new Dictionary<string, object>(); send["t"] = "menuClose"; }
+            }
+            else if (Menu.Count > 0)
+            {
+                MenuData d = Menu[Menu.Count - 1];
+                if (k == KeyBack)
+                {
+                    Menu.RemoveAt(Menu.Count - 1);
+                    if (Menu.Count == 0) { send = new Dictionary<string, object>(); send["t"] = "menuClose"; }
+                }
+                else if (k == KeyUp || k == KeyDown) d.Move(k == KeyDown);
+                else if (d.Items.Count > 0)
+                {
+                    MenuItemData it = d.Items[d.Sel];
+                    bool fire = false;
+                    object value = null;
+                    if (it.Disabled || it.Kind == "separator") { }
+                    else if (it.Kind == "checkbox") { it.Check = !it.Check; value = it.Check; fire = true; }
+                    else if (it.Kind == "list" && it.Options.Count > 0)
+                    {
+                        if (k != KeyEnter) it.Index = (it.Index + (k == KeyRight ? 1 : it.Options.Count - 1)) % it.Options.Count;
+                        value = it.Index;
+                        fire = true;
+                    }
+                    else if (it.Kind == "slider" && k != KeyEnter)
+                    {
+                        double v = it.Value + (k == KeyRight ? it.Step : -it.Step);
+                        it.Value = Math.Max(it.Min, Math.Min(it.Max, Math.Round(v / it.Step) * it.Step));
+                        value = it.Value;
+                        fire = true;
+                    }
+                    else if (it.Kind == "submenu" && k == KeyEnter && it.Sub != null) Menu.Add(it.Sub);
+                    else if (it.Kind == "button" && k == KeyEnter) fire = true;
+                    if (fire)
+                    {
+                        send = new Dictionary<string, object>();
+                        send["t"] = "menuSelect"; send["menu"] = d.Id; send["item"] = it.Id; send["value"] = value;
+                    }
+                }
+            }
+            Version++;
+        }
+        if (send != null) Send(send);
     }
 
     public void SendChat(string text)
@@ -262,13 +353,13 @@ sealed class Bridge
         }
     }
 
-    static string Str(Dictionary<string, object> m, string k, int max)
+    public static string Str(Dictionary<string, object> m, string k, int max)
     {
         object v;
         return m.TryGetValue(k, out v) && v is string ? Clean((string)v, max) : "";
     }
 
-    static double Num(Dictionary<string, object> m, string k)
+    public static double Num(Dictionary<string, object> m, string k)
     {
         object v;
         if (!m.TryGetValue(k, out v) || !(v is int || v is decimal || v is double || v is long)) return 0;
@@ -276,7 +367,7 @@ sealed class Bridge
         return d > -2e9 && d < 2e9 ? d : 0;
     }
 
-    static string Clean(string s, int max)
+    public static string Clean(string s, int max)
     {
         StringBuilder sb = new StringBuilder();
         foreach (char c in s) { if (sb.Length == max) break; sb.Append(char.IsControl(c) ? ' ' : c); }
@@ -287,10 +378,16 @@ sealed class Bridge
 /// Panneau transparent aux clics, posé sur la fenêtre du jeu. F8 : écrire, F9 : masquer.
 sealed class Overlay : Form
 {
-    const int ChatKey = 1, HideKey = 2, PanelWidth = 360, PanelHeight = 460;
+    const int ChatKey = 1, HideKey = 2, MenuKey = 3, NavKey = 10, PanelWidth = 360, PanelHeight = 460;
+    // Touches du menu ouvert : haut, bas, gauche, droite, Entrée, Retour arrière, Échap.
+    static readonly int[] NavVk = { 0x26, 0x28, 0x25, 0x27, 0x0D, 0x08, 0x1B };
+    static readonly int[] NavAction = { Bridge.KeyUp, Bridge.KeyDown, Bridge.KeyLeft, Bridge.KeyRight, Bridge.KeyEnter, Bridge.KeyBack, Bridge.KeyBack };
     readonly Bridge bridge;
     readonly ChatBox chat;
     readonly Markers markers;
+    readonly MenuLayer menu = new MenuLayer();
+    bool nav;
+    int menuVersion = -1;
     readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
     readonly Font font = new Font("Segoe UI", 10.5f), bold = new Font("Segoe UI Semibold", 10.5f), small = new Font("Segoe UI", 8.5f);
     IntPtr target;
@@ -326,7 +423,10 @@ sealed class Overlay : Form
     {
         if (m.Msg == 0x312) // WM_HOTKEY
         {
-            if ((int)m.WParam == ChatKey) chat.Open(new Point(place.X, place.Y + PanelHeight), target);
+            int id = (int)m.WParam;
+            if (id == ChatKey) chat.Open(new Point(place.X, place.Y + PanelHeight), target);
+            else if (id == MenuKey) { bridge.MenuKey(Bridge.KeyToggle); Follow(); }
+            else if (id >= NavKey && id < NavKey + NavVk.Length) { bridge.MenuKey(NavAction[id - NavKey]); Follow(); }
             else { hidden = !hidden; Follow(); }
         }
         base.WndProc(ref m);
@@ -346,14 +446,29 @@ sealed class Overlay : Form
         if (inGame != keys)
         {
             keys = inGame;
-            if (inGame) { Native.RegisterHotKey(Handle, ChatKey, 0x4000, 0x77); Native.RegisterHotKey(Handle, HideKey, 0x4000, 0x78); }
-            else { Native.UnregisterHotKey(Handle, ChatKey); Native.UnregisterHotKey(Handle, HideKey); }
+            if (inGame) { Native.RegisterHotKey(Handle, ChatKey, 0x4000, 0x77); Native.RegisterHotKey(Handle, HideKey, 0x4000, 0x78); Native.RegisterHotKey(Handle, MenuKey, 0x4000, 0x76); }
+            else { Native.UnregisterHotKey(Handle, ChatKey); Native.UnregisterHotKey(Handle, HideKey); Native.UnregisterHotKey(Handle, MenuKey); }
+        }
+        // Flèches, Entrée et Retour ne sont prises au jeu que menu ouvert.
+        bool open;
+        lock (bridge.Lock) open = bridge.Menu.Count > 0;
+        bool wantNav = inGame && !hidden && open;
+        if (wantNav != nav)
+        {
+            nav = wantNav;
+            for (int i = 0; i < NavVk.Length; i++)
+            {
+                if (nav) Native.RegisterHotKey(Handle, NavKey + i, 0, (uint)NavVk[i]);
+                else Native.UnregisterHotKey(Handle, NavKey + i);
+            }
         }
         if (!inGame || hidden)
         {
             if (Visible) Hide();
+            if (menu.Visible) menu.Hide();
             if (!inGame && chat.Visible) chat.Hide();
             drawn = false;
+            menuVersion = -1;
             return;
         }
         Native.POINT at = new Native.POINT();
@@ -365,6 +480,19 @@ sealed class Overlay : Form
         lock (bridge.Lock) fading = bridge.Lines.Count > 0 && (DateTime.UtcNow - bridge.Lines[bridge.Lines.Count - 1].At).TotalSeconds < 16;
         if (!Visible) Show();
         if (moved || v != version || !drawn || fading) { version = v; drawn = true; Present(); }
+        // Menu à droite du panneau, en haut de l'écran.
+        if (!open) { if (menu.Visible) menu.Hide(); menuVersion = -1; }
+        else if (moved || v != menuVersion)
+        {
+            menuVersion = v;
+            Bitmap b;
+            lock (bridge.Lock) b = MenuPainter.Render(bridge.Menu[bridge.Menu.Count - 1], bridge.Menu.Count);
+            using (b)
+            {
+                if (!menu.Visible) menu.Show();
+                Native.Layer(menu.Handle, b, place.X + PanelWidth + 12, place.Y);
+            }
+        }
     }
 
     public void Dump(string file)
@@ -372,7 +500,13 @@ sealed class Overlay : Form
         using (Bitmap b = Render()) b.Save(file, ImageFormat.Png);
         int shown;
         using (Bitmap m = markers.Render(1280, 720, out shown)) m.Save(file + ".markers.png", ImageFormat.Png);
-        Program.Out.WriteLine("dumped visible=" + (Visible ? 1 : 0) + " target=" + (target != IntPtr.Zero ? 1 : 0) + " markers=" + shown);
+        bool open;
+        lock (bridge.Lock)
+        {
+            open = bridge.Menu.Count > 0;
+            if (open) using (Bitmap mb = MenuPainter.Render(bridge.Menu[bridge.Menu.Count - 1], bridge.Menu.Count)) mb.Save(file + ".menu.png", ImageFormat.Png);
+        }
+        Program.Out.WriteLine("dumped visible=" + (Visible ? 1 : 0) + " target=" + (target != IntPtr.Zero ? 1 : 0) + " markers=" + shown + " menu=" + (open ? 1 : 0));
     }
 
     Bitmap Render()
@@ -394,8 +528,8 @@ sealed class Overlay : Form
                 }
                 if (bridge.Remotes.Count > 0) Radar(g, 230, 0, 120);
                 float y = PanelHeight - 20;
-                Panel(g, 0, (int)y - 2, 150, 20);
-                Label(g, "F8 écrire   F9 masquer", small, Color.White, 8, y, 300);
+                Panel(g, 0, (int)y - 2, 205, 20);
+                Label(g, "F7 menu   F8 écrire   F9 masquer", small, Color.White, 8, y, 300);
                 for (int i = bridge.Lines.Count - 1; i >= 0; i--)
                 {
                     double age = (DateTime.UtcNow - bridge.Lines[i].At).TotalSeconds;
@@ -538,6 +672,280 @@ sealed class Markers : Form
     }
 }
 
+/// Ligne d'un menu de mod (forme : docs/MENUS.md).
+sealed class MenuItemData
+{
+    public string Id = "", Kind = "button", Label = "", Desc = "", Right = "";
+    public bool Disabled, Check;
+    public int Index;
+    public double Value, Min, Max = 100, Step = 1;
+    public readonly List<string> Options = new List<string>();
+    public MenuData Sub;
+}
+
+/// Menu reçu de SixM, déjà vérifié par lui ; relu ici avec les mêmes bornes.
+sealed class MenuData
+{
+    public string Id = "", Title = "", Subtitle = "";
+    public Color Color = Color.FromArgb(247, 130, 30);
+    public readonly List<MenuItemData> Items = new List<MenuItemData>();
+    public int Sel, Top;
+
+    public static MenuData Parse(object raw, int depth)
+    {
+        Dictionary<string, object> m = raw as Dictionary<string, object>;
+        object v;
+        System.Collections.IList items = m != null && m.TryGetValue("items", out v) ? v as System.Collections.IList : null;
+        if (m == null || items == null || depth > 4) return null;
+        MenuData d = new MenuData();
+        d.Id = Bridge.Str(m, "id", 48);
+        if (d.Id.Length == 0) return null;
+        d.Title = Bridge.Str(m, "title", 48);
+        d.Subtitle = Bridge.Str(m, "subtitle", 64);
+        string color = Bridge.Str(m, "color", 7);
+        int rgb;
+        if (color.Length == 7 && color[0] == '#' && int.TryParse(color.Substring(1), System.Globalization.NumberStyles.HexNumber, null, out rgb))
+            d.Color = Color.FromArgb(255, (rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255);
+        foreach (object o in items)
+        {
+            Dictionary<string, object> im = o as Dictionary<string, object>;
+            if (im == null || d.Items.Count >= 100) continue;
+            MenuItemData it = new MenuItemData();
+            it.Id = Bridge.Str(im, "id", 48);
+            it.Kind = Bridge.Str(im, "type", 16);
+            if (Array.IndexOf(new[] { "button", "checkbox", "list", "slider", "separator", "submenu" }, it.Kind) < 0) it.Kind = "button";
+            it.Label = Bridge.Str(im, "label", 64);
+            it.Desc = Bridge.Str(im, "description", 200);
+            it.Right = Bridge.Str(im, "right", 24);
+            it.Disabled = im.TryGetValue("disabled", out v) && v is bool && (bool)v;
+            it.Check = im.TryGetValue("value", out v) && v is bool && (bool)v;
+            if (im.TryGetValue("options", out v) && v is System.Collections.IList)
+                foreach (object opt in (System.Collections.IList)v)
+                    if (opt is string && it.Options.Count < 50) it.Options.Add(Bridge.Clean((string)opt, 32));
+            it.Index = Math.Max(0, Math.Min(Math.Max(0, it.Options.Count - 1), (int)Bridge.Num(im, "value")));
+            it.Min = Bridge.Num(im, "min");
+            it.Max = Math.Max(it.Min, im.ContainsKey("max") ? Bridge.Num(im, "max") : 100);
+            it.Step = im.ContainsKey("step") && Bridge.Num(im, "step") > 0 ? Bridge.Num(im, "step") : 1;
+            it.Value = Math.Max(it.Min, Math.Min(it.Max, Bridge.Num(im, "value")));
+            if (it.Kind == "submenu") it.Sub = Parse(im.TryGetValue("menu", out v) ? v : null, depth + 1);
+            d.Items.Add(it);
+        }
+        d.Sel = 0;
+        while (d.Sel < d.Items.Count - 1 && d.Items[d.Sel].Kind == "separator") d.Sel++;
+        return d;
+    }
+
+    /// Ligne suivante ou précédente, en sautant les séparateurs.
+    public void Move(bool down)
+    {
+        int n = Items.Count;
+        if (n == 0) return;
+        int i = Sel;
+        for (int k = 0; k < n; k++)
+        {
+            i = down ? (i + 1) % n : (i + n - 1) % n;
+            if (Items[i].Kind != "separator") break;
+        }
+        Sel = i;
+    }
+}
+
+/// Dessin d'un menu : bandeau, sous-titre et compteur, lignes, description, aide.
+static class MenuPainter
+{
+    public const int Width = 400, Banner = 92, Bar = 30, Row = 36, Visible = 10;
+
+    static Color Mix(Color a, Color b, double t)
+    {
+        return Color.FromArgb((int)(a.A + (b.A - a.A) * t), (int)(a.R + (b.R - a.R) * t), (int)(a.G + (b.G - a.G) * t), (int)(a.B + (b.B - a.B) * t));
+    }
+
+    static void Text(Graphics g, string s, Font f, Color c, float x, float y, float w, StringAlignment align)
+    {
+        using (SolidBrush b = new SolidBrush(c))
+        using (StringFormat format = new StringFormat(StringFormatFlags.NoWrap))
+        {
+            format.Alignment = align;
+            format.LineAlignment = StringAlignment.Center;
+            format.Trimming = StringTrimming.EllipsisCharacter;
+            g.DrawString(s, f, b, new RectangleF(x, y, w, Row), format);
+        }
+    }
+
+    public static Bitmap Render(MenuData menu, int depth)
+    {
+        if (menu.Sel < menu.Top) menu.Top = menu.Sel;
+        if (menu.Sel >= menu.Top + Visible) menu.Top = menu.Sel + 1 - Visible;
+        int shown = Math.Min(Visible, menu.Items.Count);
+        string desc = menu.Items.Count > 0 ? menu.Items[menu.Sel].Desc : "";
+        int height = Banner + Bar + Row * shown + (desc.Length > 0 ? 46 : 0) + 24;
+        Bitmap b = new Bitmap(Width, height, PixelFormat.Format32bppPArgb);
+        Color accent = menu.Color;
+        using (Graphics g = Graphics.FromImage(b))
+        using (Font title = new Font("Segoe UI", menu.Title.Length > 18 ? 18f : 23f, FontStyle.Bold | FontStyle.Italic))
+        using (Font sub = new Font("Segoe UI Semibold", 8.5f))
+        using (Font row = new Font("Segoe UI", 10.5f))
+        using (Font rowBold = new Font("Segoe UI Semibold", 10.5f))
+        using (Font small = new Font("Segoe UI", 8.5f))
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+
+            // Bandeau : dégradé, bandes obliques, hexagone.
+            Rectangle banner = new Rectangle(0, 0, Width, Banner);
+            using (LinearGradientBrush br = new LinearGradientBrush(banner, accent, Mix(accent, Color.Black, 0.65), 20f)) g.FillRectangle(br, banner);
+            g.SetClip(banner);
+            using (Pen stripe = new Pen(Color.FromArgb(10, 255, 255, 255), 12))
+                for (int k = 0; k < 8; k++) g.DrawLine(stripe, 30 + k * 58, Banner, 95 + k * 58, 0);
+            PointF[] hex = new PointF[6];
+            for (int k = 0; k < 6; k++) hex[k] = new PointF((float)(Width - 52 + 34 * Math.Sin(k * Math.PI / 3)), (float)(Banner / 2 - 34 * Math.Cos(k * Math.PI / 3)));
+            using (Pen p = new Pen(Color.FromArgb(50, 255, 255, 255), 2)) g.DrawPolygon(p, hex);
+            g.ResetClip();
+            string t = menu.Title.ToUpperInvariant();
+            using (SolidBrush shadow = new SolidBrush(Color.FromArgb(110, 0, 0, 0))) g.DrawString(t, title, shadow, 22, Banner / 2 - title.Height / 2 + 3);
+            g.DrawString(t, title, Brushes.White, 20, Banner / 2 - title.Height / 2);
+
+            // Sous-titre et compteur.
+            using (SolidBrush bar = new SolidBrush(Color.FromArgb(245, 8, 9, 12))) g.FillRectangle(bar, 0, Banner, Width, Bar);
+            int count = 0, index = 0;
+            for (int i = 0; i < menu.Items.Count; i++) if (menu.Items[i].Kind != "separator") { count++; if (i <= menu.Sel) index = count; }
+            string subtitle = (depth > 1 ? "‹  " : "") + menu.Subtitle.ToUpperInvariant();
+            Color lighter = Mix(accent, Color.White, 0.25);
+            g.TranslateTransform(0, Banner - (Row - Bar) / 2f);
+            Text(g, subtitle, sub, lighter, 16, 0, Width - 100, StringAlignment.Near);
+            Text(g, index + " / " + count, sub, Color.FromArgb(140, 146, 158), Width - 116, 0, 100, StringAlignment.Far);
+            g.ResetTransform();
+
+            // Lignes.
+            int top = Banner + Bar;
+            using (SolidBrush back = new SolidBrush(Color.FromArgb(228, 10, 11, 15))) g.FillRectangle(back, 0, top, Width, Row * shown);
+            for (int n = 0; n < shown && menu.Top + n < menu.Items.Count; n++)
+            {
+                int i = menu.Top + n;
+                MenuItemData it = menu.Items[i];
+                int y = top + n * Row;
+                if (it.Kind == "separator")
+                {
+                    using (Pen line = new Pen(Color.FromArgb(60, 255, 255, 255)))
+                    {
+                        g.DrawLine(line, 16, y + Row / 2, Width / 2 - 70, y + Row / 2);
+                        g.DrawLine(line, Width / 2 + 70, y + Row / 2, Width - 16, y + Row / 2);
+                    }
+                    Text(g, it.Label.ToUpperInvariant(), small, Color.FromArgb(110, 116, 128), Width / 2 - 70, y, 140, StringAlignment.Center);
+                    continue;
+                }
+                bool on = i == menu.Sel;
+                if (on)
+                {
+                    Rectangle hl = new Rectangle(5, y + 3, Width - 10, Row - 6);
+                    using (LinearGradientBrush br = new LinearGradientBrush(hl, Color.FromArgb(225, accent), Color.FromArgb(45, accent), 0f)) g.FillRectangle(br, hl);
+                    g.FillRectangle(Brushes.White, 5, y + 3, 3, Row - 6);
+                }
+                Color fg = it.Disabled ? Color.FromArgb(110, 116, 128) : on ? Color.White : Color.FromArgb(225, 228, 234);
+                Text(g, it.Label, on ? rowBold : row, fg, 20, y, Width - 170, StringAlignment.Near);
+                int right = Width - 18;
+                if (it.Kind == "checkbox")
+                {
+                    Rectangle box = new Rectangle(right - 16, y + Row / 2 - 8, 16, 16);
+                    if (it.Check)
+                    {
+                        using (SolidBrush fill = new SolidBrush(on ? Color.White : accent)) g.FillRectangle(fill, box);
+                        using (Pen tick = new Pen(on ? accent : Color.White, 2))
+                            g.DrawLines(tick, new[] { new PointF(box.X + 3, box.Y + 8), new PointF(box.X + 7, box.Y + 12), new PointF(box.X + 13, box.Y + 4) });
+                    }
+                    else using (Pen p = new Pen(fg, 1.5f)) g.DrawRectangle(p, box);
+                }
+                else if (it.Kind == "list")
+                {
+                    string value = it.Options.Count > 0 ? it.Options[it.Index] : "";
+                    Text(g, on ? "‹  " + value + "  ›" : value, rowBold, fg, right - 160, y, 160, StringAlignment.Far);
+                }
+                else if (it.Kind == "slider")
+                {
+                    double frac = it.Max > it.Min ? (it.Value - it.Min) / (it.Max - it.Min) : 0;
+                    int tx = right - 150, ty = y + Row / 2 - 2;
+                    using (SolidBrush track = new SolidBrush(Color.FromArgb(40, 255, 255, 255))) g.FillRectangle(track, tx, ty, 105, 4);
+                    using (SolidBrush fill = new SolidBrush(on ? Color.White : accent)) g.FillRectangle(fill, tx, ty, (float)(105 * frac), 4);
+                    g.FillEllipse(Brushes.White, (float)(tx + 105 * frac - 5), ty - 3, 10, 10);
+                    string label = it.Step % 1 == 0 ? Math.Round(it.Value).ToString() : it.Value.ToString("0.0");
+                    Text(g, label, rowBold, fg, right - 40, y, 40, StringAlignment.Far);
+                }
+                else if (it.Kind == "submenu") Text(g, (it.Right.Length > 0 ? it.Right + "   " : "") + "›", rowBold, on ? Color.White : Color.FromArgb(160, 166, 178), right - 160, y, 160, StringAlignment.Far);
+                else if (it.Right.Length > 0) Text(g, it.Right, rowBold, on ? Color.White : Color.FromArgb(160, 166, 178), right - 160, y, 160, StringAlignment.Far);
+            }
+            if (menu.Items.Count > Visible)
+            {
+                if (menu.Top > 0) Text(g, "▲", small, Color.Gray, 0, top - Row / 2 + 6, Width, StringAlignment.Center);
+                if (menu.Top + Visible < menu.Items.Count) Text(g, "▼", small, Color.Gray, 0, top + Row * shown - Row / 2 - 6, Width, StringAlignment.Center);
+            }
+
+            int bottom = top + Row * shown;
+            if (desc.Length > 0)
+            {
+                using (SolidBrush back = new SolidBrush(Color.FromArgb(235, 10, 11, 15))) g.FillRectangle(back, 0, bottom, Width, 46);
+                using (SolidBrush line = new SolidBrush(accent)) g.FillRectangle(line, 0, bottom, Width, 2);
+                using (SolidBrush ink = new SolidBrush(Color.FromArgb(225, 228, 234)))
+                    g.DrawString(desc, small, ink, new RectangleF(16, bottom + 8, Width - 32, 36));
+                bottom += 46;
+            }
+            using (SolidBrush back = new SolidBrush(Color.FromArgb(220, 8, 9, 12))) g.FillRectangle(back, 0, bottom, Width, 24);
+            g.TranslateTransform(0, bottom - (Row - 24) / 2f);
+            Text(g, "↑↓ naviguer    Entrée valider    Retour arrière    F7 fermer", small, Color.FromArgb(140, 146, 158), 0, 0, Width, StringAlignment.Center);
+            g.ResetTransform();
+        }
+        return b;
+    }
+}
+
+/// Calque du menu, transparent aux clics comme le reste de la surcouche.
+sealed class MenuLayer : Form
+{
+    public MenuLayer()
+    {
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+    }
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            CreateParams p = base.CreateParams;
+            p.ExStyle |= 0x80000 | 0x20 | 0x08000000 | 0x80 | 0x8;
+            return p;
+        }
+    }
+
+    protected override bool ShowWithoutActivation { get { return true; } }
+}
+
+/// Fausse fenêtre de jeu (--demo) : la surcouche s'y attache comme à VIctory.
+sealed class DemoWindow : Form
+{
+    public DemoWindow()
+    {
+        Text = "SixM : démo de la surcouche";
+        ClientSize = new Size(1280, 720);
+        StartPosition = FormStartPosition.CenterScreen;
+        DoubleBuffered = true;
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        Graphics g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        using (LinearGradientBrush sky = new LinearGradientBrush(ClientRectangle, Color.FromArgb(255, 120, 60), Color.FromArgb(40, 20, 70), 90f)) g.FillRectangle(sky, ClientRectangle);
+        using (SolidBrush city = new SolidBrush(Color.FromArgb(18, 14, 30)))
+            for (int x = 0, k = 0; x < ClientSize.Width; x += 70, k++)
+                g.FillRectangle(city, x, ClientSize.Height - 120 - (k * 53 % 170), 62, 400);
+        using (Font f = new Font("Segoe UI", 14f))
+        using (SolidBrush ink = new SolidBrush(Color.FromArgb(200, 255, 255, 255)))
+            g.DrawString("Fenêtre de démonstration : la surcouche de SixM s'affiche par-dessus.\nF7 : menu des mods   F8 : écrire   F9 : masquer", f, ink, 24, ClientSize.Height - 80);
+    }
+
+    protected override void OnResize(EventArgs e) { base.OnResize(e); Invalidate(); }
+}
+
 sealed class ChatBox : Form
 {
     readonly TextBox box = new TextBox();
@@ -606,6 +1014,7 @@ static class Native
     [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool attach);
     [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+    [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int index);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
@@ -663,7 +1072,8 @@ static class Native
             int owner;
             RECT r;
             GetWindowThreadProcessId(h, out owner);
-            if (owner != pid || !IsWindowVisible(h)) return true;
+            // Nos propres calques (surcouche, noms, menu) ne sont jamais « le jeu ».
+            if (owner != pid || !IsWindowVisible(h) || (GetWindowLong(h, -20) & 0x80000) != 0) return true;
             if (best == IntPtr.Zero && IsIconic(h)) { best = h; return true; }
             if (GetClientRect(h, out r) && (long)r.R * r.B > area) { area = (long)r.R * r.B; best = h; }
             return true;

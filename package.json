@@ -12,6 +12,7 @@
     "start": "node server/index.js",
     "bot": "node client/bot.js",
     "sim-bridge": "node integrations/victory/sim-bridge.js",
+    "overlay-demo": "node scripts/overlay-demo.mjs",
     "test": "node --test \"test/*.test.js\"",
     "package": "node packaging/build.mjs",
     "readme": "node scripts/readme.mjs",

@@ -2,7 +2,8 @@
 
 **État :** deux bridges parlent ce protocole.
 - **SixM Link** (`link/SixMLink.cs`, Windows) : programme à part, sans modification de VIctory ni lecture de la
-  mémoire du jeu. Surcouche (chat, joueurs, radar), F8 pour écrire, F9 pour masquer. Il ne connaît pas la position
+  mémoire du jeu. Surcouche (chat, joueurs, radar, menus des mods), F7 pour le menu, F8 pour écrire, F9 pour
+  masquer. Les flèches, Entrée, Retour arrière et Échap ne sont prises au jeu que menu ouvert. Il ne connaît pas la position
   du joueur et ne crée pas de personnages. SixM le compile et le lance tout seul.
 - **Module dans VIctory** (`sixm-bridge/`, Rust, MIT) : SixM l'ajoute en compilant VIctory. Il donne la position du
   joueur et la caméra, lues sans rien écrire, à l'endroit indiqué par un **profil local** de la version du jeu. SixM
@@ -34,6 +35,8 @@ connecte comme client. Le bridge lit/écrit l'état du jeu ; le serveur SixM ne 
 - `{"t":"localPlayer","x","y","z","h"}` — position du joueur local (~20 Hz).
 
 - `{"t":"chat","text"}` — message écrit par le joueur depuis le jeu.
+- `{"t":"menuOpen"}` — touche du menu ; `{"t":"menuClose"}` — menu fermé dans le jeu.
+- `{"t":"menuSelect","menu","item","value"}` — choix dans un menu (`value` : `null`, booléen ou nombre).
 
 ## Adaptateur → bridge
 - `{"t":"view","m":[16],"x","y","z"}` — caméra du jeu et position locale, pour placer les noms.
@@ -42,6 +45,8 @@ connecte comme client. Le bridge lit/écrit l'état du jeu ; le serveur SixM ne 
 - `{"t":"setRemote","id","name","x","y","z","h"}` — créer/déplacer l'avatar d'un joueur distant.
 - `{"t":"removeRemote","id"}`
 - `{"t":"log","text"}` — chat / notifications à afficher.
+- `{"t":"menu","menu"}` — menu d'un mod à dessiner (forme : docs/MENUS.md) ; `{"t":"menuClose"}` le ferme.
+  Les sous-menus sont parcourus dans le bridge.
 
 ## Règles (alignées sur docs/asset-policy.md de VIctory)
 - Les offsets et signatures propres à un build vivent dans un **profil local hors dépôt**, sous des
@@ -56,6 +61,9 @@ par joueur distant connu. Le bridge doit donc partir d'un état vide à chaque c
 la position locale est inconnue et rien n'est envoyé au serveur. `ready` est attendu sous 5 s.
 
 ## Tester sans jeu
+`npm run overlay-demo` (Windows) : SixM Link ouvre une fausse fenêtre de jeu, s'y attache et rejoint un serveur local
+avec le mod `menu` ; F7 ouvre le menu. `SixMLink.exe --render-menu menu.json sortie.png` dessine un menu sans fenêtre.
+
 ```bash
 npm run sim-bridge    # bridge simulé sur 127.0.0.1:30121
 ```

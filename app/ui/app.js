@@ -547,7 +547,7 @@ function sessionScreen() {
             : !m.build ? 'En attente du jeu.'
               : m.profile ? 'Profil trouvé, position pas encore lisible.'
                 : `Aucun profil pour cette version du jeu (${m.build}) : chat et liste des joueurs seulement.`;
-      hintText.textContent = `F8 pour écrire, F9 pour masquer. ${why}`;
+      hintText.textContent = `Dans le jeu : F7 menu, F8 écrire, F9 masquer. ${why}`;
       profiles.hidden = !m?.build || (m.profile && !m.error);
       const server = s.serverName || s.address;
       if (title.textContent !== server) { title.textContent = server; face.replaceChildren(avatar(server, 'big')); }

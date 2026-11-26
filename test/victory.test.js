@@ -4,8 +4,16 @@ import net from 'node:net';
 import { createServer } from '../server/index.js';
 import { SixMClient } from '../client/client.js';
 import { VictoryAdapter } from '../client/adapters/victory.js';
+import { createIdentity } from '../server/identity.js';
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const until = async (cond, what, ms = 5000) => {
+  const end = Date.now() + ms;
+  while (!cond()) {
+    if (Date.now() > end) assert.fail(`délai dépassé : ${what}`);
+    await wait(10);
+  }
+};
 
 function fakeBridge(build = 'build-A') {
   const received = [];
@@ -49,5 +57,31 @@ test('SixM de bout en bout via le bridge', async () => {
 
   await other.disconnect(); await wait(200);
   assert.ok(bridge.received.some((m) => m.t === 'removeRemote'));
+  await cv.disconnect(); bridge.close(); await srv.stop();
+});
+
+test('menus dans le jeu : la surcouche reçoit le menu et renvoie touches et choix', async () => {
+  const srv = await createServer({ name: 'Vice', port: 0, tickRate: 50, resourcesDir: 'resources', autostart: ['hello', 'menu'] });
+  const bridge = await fakeBridge();
+  const va = new VictoryAdapter({ port: bridge.port, allowedBuilds: ['build-A'] });
+  const cv = new SixMClient({ url: `ws://localhost:${srv.net.port}`, name: 'Vic', adapter: va, identity: createIdentity() });
+  await cv.connect();
+  const sent = (t) => bridge.received.filter((m) => m.t === t);
+
+  bridge.push({ t: 'menuOpen' }); // touche du menu, dans le jeu
+  await until(() => sent('menu').at(-1)?.menu.id === 'sixm:main', 'menu principal envoyé à la surcouche');
+  bridge.push({ t: 'menuSelect', menu: 'sixm:main', item: 'emotes', value: null });
+  await until(() => sent('menu').at(-1)?.menu.id === 'emotes', 'sous-menu');
+  bridge.push({ t: 'menuSelect', menu: 'emotes', item: '1', value: null });
+  await until(() => va.logs.includes('* Vic danse'), 'choix fait dans le jeu');
+  bridge.push({ t: 'menuSelect', menu: 'emotes', item: 'x', value: { pas: 'un nombre' } });
+  bridge.push({ t: 'menuClose' });
+  await until(() => cv.menu === null, 'fermé depuis le jeu');
+
+  // Fermé depuis la fenêtre de SixM : la surcouche le ferme aussi.
+  bridge.push({ t: 'menuOpen' });
+  await until(() => cv.menu, 'rouvert');
+  cv.closeMenu();
+  await until(() => sent('menuClose').length >= 1, 'fermeture relayée');
   await cv.disconnect(); bridge.close(); await srv.stop();
 });

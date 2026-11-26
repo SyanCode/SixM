@@ -37,6 +37,12 @@ export class SixMClient {
         onLog: (text) => this.adapter.log(clean(text)),
       });
       this.adapter.onChat = (text) => this.emitServer('chat', clean(text, 200));
+      // Menus pilotés depuis le jeu (surcouche) : mêmes messages que depuis la fenêtre de SixM.
+      this.adapter.onMenuOpen = () => this.openMenu();
+      this.adapter.onMenuClose = () => this.closeMenu();
+      this.adapter.onMenuSelect = (menu, item, value) => {
+        if (['boolean', 'number', 'object'].includes(typeof value)) this.selectMenu(clean(menu, 48), clean(item, 48), value === null || typeof value !== 'object' ? value : null);
+      };
       await this.#handshake();
     } catch (e) {
       this.ws?.terminate();

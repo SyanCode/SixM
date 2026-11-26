@@ -49,9 +49,10 @@ export function buildLink(dir = defaultLinkDir()) {
  * Démarre SixM Link sur 127.0.0.1:port. Si le port est pris, un bridge (par exemple celui d'un futur
  * VIctory) y répond déjà : on l'utilise.
  */
-export async function startLink({ port = 30121, dir } = {}) {
+export async function startLink({ port = 30121, dir, demo = false } = {}) {
   const exe = await buildLink(dir);
-  const p = spawn(exe, ['--serve', String(port)]);
+  // demo : SixM Link ouvre une fausse fenêtre de jeu et y pose sa surcouche.
+  const p = spawn(exe, ['--serve', String(port), ...(demo ? ['--demo'] : [])]);
   p.stdin.on('error', () => {});
   p.stdout.setEncoding('utf8');
   p.stderr.resume();

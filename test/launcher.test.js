@@ -158,10 +158,15 @@ test('SixM Link : protocole, un seul client, entrées hostiles, arrêt avec SixM
     { t: 'setRemote', id: 'x', name: 5, x: 'a', y: null }, { t: 'setRemote', id: 1e300, x: 1e300, y: -1e300 }, { t: 'setRemote' },
     { t: 'roster', players: 'x' }, { t: 'roster', players: [1, null, {}, 'A\u0000B'], server: 3 }, { t: 'log' }, { t: 'log', text: 'x'.repeat(5000) },
     { t: 'target', pid: -1 }, { t: 'target', pid: 'x' }, { t: 'inconnu' }, {},
+    { t: 'menu' }, { t: 'menu', menu: 'x' }, { t: 'menu', menu: { id: '', items: [] } }, { t: 'menu', menu: { id: 'm', items: 'x' } },
+    { t: 'menu', menu: { id: 'm', items: [null, 3, { type: 'list', options: [1, 'a'], value: 9 }, { type: 'submenu', menu: 'x' }] } },
   ]) c.s.write(JSON.stringify(m) + '\n');
   const png = path.join(tmp(), 'o.png');
-  assert.equal(await link.dump(png), 'dumped visible=0 target=0 markers=0');
+  assert.equal(await link.dump(png), 'dumped visible=0 target=0 markers=0 menu=1', 'le dernier menu, réduit à ses lignes valides');
   assert.ok(fs.statSync(png).size > 500);
+  assert.ok(fs.statSync(`${png}.menu.png`).size > 2000, 'menu dessiné');
+  c.s.write('{"t":"menuClose"}\n');
+  assert.equal(await link.dump(png), 'dumped visible=0 target=0 markers=0 menu=0');
   assert.equal(c.closed, false);
 
   const second = await startLink({ port: link.port, dir: linkDir });

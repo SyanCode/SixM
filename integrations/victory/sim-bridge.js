@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 export function startSimBridge({ port = 30121, build = 'sim', rateHz = 20, path = null } = {}) {
   const remotes = new Map();
   const logs = [];
+  const menus = []; // menus reçus, null pour une fermeture
   const sockets = new Set();
   const position = path ?? ((t) => ({ x: Math.cos(t) * 10, y: Math.sin(t) * 10, z: 0, h: t }));
   const start = performance.now();
@@ -32,6 +33,8 @@ export function startSimBridge({ port = 30121, build = 'sim', rateHz = 20, path 
         if (m?.t === 'setRemote') remotes.set(m.id, { name: m.name, x: m.x, y: m.y, z: m.z, h: m.h });
         else if (m?.t === 'removeRemote') remotes.delete(m.id);
         else if (m?.t === 'log') logs.push(m.text);
+        else if (m?.t === 'menu') menus.push(m.menu);
+        else if (m?.t === 'menuClose') menus.push(null);
       }
     });
     s.on('error', () => {});
@@ -41,7 +44,9 @@ export function startSimBridge({ port = 30121, build = 'sim', rateHz = 20, path 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, '127.0.0.1', () => resolve({
-      port: server.address().port, remotes, logs,
+      port: server.address().port, remotes, logs, menus,
+      /** Message du « jeu » vers SixM, ex. { t: 'menuOpen' } (touche du menu). */
+      send: (m) => { for (const s of sockets) s.write(JSON.stringify(m) + '\n'); },
       close: () => {
         for (const s of sockets) s.destroy();
         return new Promise((r) => server.close(r));

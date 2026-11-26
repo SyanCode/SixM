@@ -103,7 +103,7 @@ impl SixmApp {
                     ui.set_width(ui.available_width());
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(ic::INFO).size(18.0).color(YELLOW));
-                        ui.add(egui::Label::new(RichText::new(format!("F8 pour écrire, F9 pour masquer. {why}")).color(TEXT)).wrap());
+                        ui.add(egui::Label::new(RichText::new(format!("Dans le jeu : F7 menu, F8 écrire, F9 masquer. {why}")).color(TEXT)).wrap());
                         let show = truthy(&m.build) && !(truthy(&m.profile) && m.error.is_none());
                         if show {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

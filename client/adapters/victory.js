@@ -27,6 +27,7 @@ export class VictoryAdapter extends GameAdapter {
     this.logs = [];
     this.remotes = new Map();
     this.roster = null;
+    this.menu = null; // menu ouvert, renvoyé au bridge après une reconnexion
     this.pid = 0;
     this.module = null;
     this.closing = false;
@@ -76,12 +77,20 @@ export class VictoryAdapter extends GameAdapter {
             this.build = m.build; this.sock = sock;
             if (this.pid) this.#send({ t: 'target', pid: this.pid });
             if (this.roster) this.#send(this.roster);
+            if (this.menu) this.#send({ t: 'menu', menu: this.menu });
             for (const [id, r] of this.remotes) this.#send({ t: 'setRemote', id, name: r.name, ...r.pos });
             resolve();
           } else if (ready && m.t === 'localPlayer' && [m.x, m.y, m.z, m.h].every(Number.isFinite)) {
             this.pos = { x: m.x, y: m.y, z: m.z, h: m.h };
           } else if (ready && m.t === 'chat' && typeof m.text === 'string') {
             this.onChat?.(m.text);
+          } else if (ready && m.t === 'menuOpen') {
+            this.onMenuOpen?.();
+          } else if (ready && m.t === 'menuClose') {
+            this.menu = null;
+            this.onMenuClose?.();
+          } else if (ready && m.t === 'menuSelect' && typeof m.menu === 'string' && typeof m.item === 'string') {
+            this.onMenuSelect?.(m.menu, m.item, m.value ?? null);
           }
         }
       });
@@ -138,6 +147,12 @@ export class VictoryAdapter extends GameAdapter {
     if (pid === this.pid) return;
     this.pid = pid;
     this.#send({ t: 'target', pid });
+  }
+  /** Menu d'un mod, dessiné par la surcouche ; null le ferme. */
+  setMenu(menu) {
+    if (!menu && !this.menu) return;
+    this.menu = menu;
+    this.#send(menu ? { t: 'menu', menu } : { t: 'menuClose' });
   }
   log(text) { this.logs.push(text); this.#send({ t: 'log', text }); console.log(`[game] ${text}`); }
   async shutdown() { this.closing = true; this.module?.stop(); (this.sock ?? this.pending)?.end(); }
