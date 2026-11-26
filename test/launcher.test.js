@@ -129,9 +129,10 @@ test('launcher : arguments, journal, arrêt, plantage, recherche', { skip }, asy
   assert.throws(() => l.launch(victory, { id: 'a', name: 'Jeu', path: exe, console: 'series-x' }), /ne démarre pas/);
 });
 
-test('SixM Link : protocole, un seul client, entrées hostiles, arrêt avec SixM', { skip }, async () => {
+test('SixM Link : protocole, un seul client, entrées hostiles, arrêt avec SixM', { skip }, async (t) => {
   const linkDir = path.join(await tools(), 'link');
   const link = await startLink({ port: 0, dir: linkDir });
+  t.after(() => link.stop()); // même en échec : un SixM Link resté ouvert bloquerait ce fichier de test
   const open = async () => {
     const s = net.connect(link.port, '127.0.0.1');
     s.setEncoding('utf8');

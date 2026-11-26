@@ -59,28 +59,35 @@ test('du module à la surcouche : les joueurs sont placés à l\'écran', { skip
   const fake = await fakeModule('jeton-de-test-0123');
   const link = await startLink({ port: 0, dir: path.join(os.tmpdir(), 'sixm-test-link') });
   const a = new VictoryAdapter({ port: link.port });
-  await a.init();
-  a.useModule(new GameModule({ port: fake.port, token: 'jeton-de-test-0123', retryMs: 20 }));
-  await until(() => fake.socks.length, 'module');
-  fake.send({ t: 'localPlayer', x: 0, y: 0, z: 0, h: 0 });
-  await until(() => a.getLocalPlayerPosition(), 'position');
-  // Caméra en (0,0,0) regardant vers +Y : clip = (x, z, y, y).
-  const view = [1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0];
-  a.setRemotePlayer(1, 'Devant', { x: 0, y: 30, z: 0, h: 0 });
-  a.setRemotePlayer(2, 'À droite', { x: 10, y: 20, z: 2, h: 0 });
-  a.setRemotePlayer(3, 'Derrière', { x: 0, y: -30, z: 0, h: 0 });
-  a.setRemotePlayer(4, 'Hors champ', { x: 100, y: 10, z: 0, h: 0 });
-  const png = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sixm-')), 'o.png');
-  const timer = setInterval(() => fake.send({ t: 'camera', m: view }), 30);
-  await until(async () => (await link.dump(png)).endsWith('markers=2'), 'deux joueurs visibles');
-  clearInterval(timer);
-  assert.ok(fs.statSync(`${png}.markers.png`).size > 1500);
-  if (process.env.SIXM_OVERLAY_PNG) fs.copyFileSync(`${png}.markers.png`, process.env.SIXM_OVERLAY_PNG);
-  await wait(1300);
-  assert.match(await link.dump(png), /markers=0/, 'plus de caméra : plus de noms');
-  await a.shutdown();
-  fake.close();
-  await link.stop();
+  // Même en échec, SixM Link est arrêté : sinon ce fichier de test ne se termine jamais.
+  try {
+    await a.init();
+    a.useModule(new GameModule({ port: fake.port, token: 'jeton-de-test-0123', retryMs: 20 }));
+    await until(() => fake.socks.length, 'module');
+    fake.send({ t: 'localPlayer', x: 0, y: 0, z: 0, h: 0 });
+    await until(() => a.getLocalPlayerPosition(), 'position');
+    // Caméra en (0,0,0) regardant vers +Y : clip = (x, z, y, y).
+    const view = [1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0];
+    a.setRemotePlayer(1, 'Devant', { x: 0, y: 30, z: 0, h: 0 });
+    a.setRemotePlayer(2, 'À droite', { x: 10, y: 20, z: 2, h: 0 });
+    a.setRemotePlayer(3, 'Derrière', { x: 0, y: -30, z: 0, h: 0 });
+    a.setRemotePlayer(4, 'Hors champ', { x: 100, y: 10, z: 0, h: 0 });
+    const png = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sixm-')), 'o.png');
+    const timer = setInterval(() => fake.send({ t: 'camera', m: view }), 30);
+    try {
+      await until(async () => /\bmarkers=2\b/.test(await link.dump(png)), 'deux joueurs visibles');
+    } finally {
+      clearInterval(timer);
+    }
+    assert.ok(fs.statSync(`${png}.markers.png`).size > 1500);
+    if (process.env.SIXM_OVERLAY_PNG) fs.copyFileSync(`${png}.markers.png`, process.env.SIXM_OVERLAY_PNG);
+    await wait(1300);
+    assert.match(await link.dump(png), /\bmarkers=0\b/, 'plus de caméra : plus de noms');
+  } finally {
+    await a.shutdown();
+    fake.close();
+    await link.stop();
+  }
 });
 
 test('verrou de cargo et empreinte du module', () => {
