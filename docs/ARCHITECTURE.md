@@ -7,6 +7,7 @@ desktop/                  interface native en Rust (egui) : fenêtre de SixM, pa
 app/ui/                   interface web, utilisée si l'interface native manque (SIXM_WEB_UI=1 pour la forcer)
 app/session.js, hosts.js  partie en cours ; serveurs hébergés
 app/builder.js            télécharge et compile VIctory (git, cargo), sans code de VIctory ici
+app/ports.js              portages connus (VIctory, VIctory Belobug AMD, dépôt au choix) et leurs options de lancement
 app/updater.js            mise à jour de SixM depuis GitHub
 app/launcher.js           lance VIctory sur l'installation choisie
 app/mods.js, pack.js      import de mods ; serveur téléchargeable (zip.js)

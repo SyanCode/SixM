@@ -1,4 +1,4 @@
-//! Installation de VIctory et jeu lancé par SixM.
+//! Installation du portage choisi (VIctory ou un fork) et jeu lancé par SixM.
 
 use super::{Job, SixmApp};
 use crate::theme::{self, ic, Kind, ACCENT, GREEN, MUTED, RED, TEXT};
@@ -6,8 +6,8 @@ use eframe::egui::{self, vec2, Align, Layout, RichText, Ui};
 use serde_json::json;
 
 const TOOLS: [(&str, &str, &str); 3] = [
-    ("git", "Installer Git ?", "Git télécharge le code de VIctory. Installation avec winget, environ 350 Mo."),
-    ("rust", "Installer Rust ?", "Rust compile VIctory. Installation avec winget, environ 1 Go."),
+    ("git", "Installer Git ?", "Git télécharge le code du portage. Installation avec winget, environ 350 Mo."),
+    ("rust", "Installer Rust ?", "Rust compile le portage. Installation avec winget, environ 1 Go."),
     (
         "msvc",
         "Installer les outils C++ de Microsoft ?",
@@ -51,7 +51,8 @@ impl SixmApp {
                 ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, ic::WRENCH, theme::f(22.0), ACCENT);
                 ui.add_space(6.0);
                 ui.vertical(|ui| {
-                    ui.label(theme::title(if v.installed.is_some() { "VIctory" } else { "Installer VIctory" }, 18.0));
+                    let name = if v.name.is_empty() { "VIctory".to_string() } else { v.name.clone() };
+                    ui.label(theme::title(if v.installed.is_some() { name.clone() } else { format!("Installer {name}") }, 18.0));
                     let text = match &v.installed {
                         Some(i) => format!(
                             "Version {}. {}",
@@ -59,8 +60,9 @@ impl SixmApp {
                             if v.module_stale { "Le module multijoueur a changé : recompilez pour l'avoir." } else { "Module multijoueur inclus." }
                         ),
                         None => format!(
-                            "SixM télécharge le code public de VIctory (GPL-3, version {}) et le compile sur ce PC. Aucun fichier de jeu n'est fourni.",
-                            short(&v.pinned)
+                            "SixM télécharge le code public de {name} ({}, {}) et le compile sur ce PC. Aucun fichier de jeu n'est fourni.",
+                            v.repo.trim_start_matches("https://github.com/").trim_end_matches(".git"),
+                            v.pinned.as_deref().map(|p| format!("version {}", short(p))).unwrap_or_else(|| "dernière version".into())
                         ),
                     };
                     ui.add(egui::Label::new(theme::muted(text)).wrap());
@@ -140,7 +142,7 @@ impl SixmApp {
                         if theme::button(ui, Kind::Normal, ic::ARROWS_CLOCKWISE, "Mettre à jour").clicked() {
                             self.victory_update();
                         }
-                    } else if theme::button_if(ui, Kind::Primary, ic::DOWNLOAD_SIMPLE, if again { "Réessayer" } else { "Installer VIctory" }, ready == Some(true)).clicked() {
+                    } else if theme::button_if(ui, Kind::Primary, ic::DOWNLOAD_SIMPLE, if again { "Réessayer" } else { "Installer" }, ready == Some(true)).clicked() {
                         self.post("/api/victory/install", json!({}));
                     }
                     if theme::button(ui, Kind::Ghost, "", "Revérifier").clicked() {

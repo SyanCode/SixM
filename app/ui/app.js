@@ -323,7 +323,7 @@ const TOOLS = {
   rust: ['Installer Rust ?', 'Rust compile VIctory. Installation avec winget, environ 1 Go.'],
   msvc: ['Installer les outils C++ de Microsoft ?', 'Visual Studio Build Tools 2022, plusieurs Go. Windows demandera une autorisation d\'administrateur, et l\'installation vaut acceptation de la licence Microsoft.'],
 };
-const short = (sha) => sha.slice(0, 10);
+const short = (sha) => (sha ?? '').slice(0, 10);
 
 /** Installation de VIctory : prérequis, progression, journal. */
 function victoryPanel({ onLater } = {}) {

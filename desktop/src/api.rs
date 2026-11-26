@@ -19,6 +19,38 @@ pub struct State {
     pub link_supported: bool,
     pub victory: Victory,
     pub update: Update,
+    pub ports: Vec<Port>,
+}
+
+/// Projet de portage que SixM sait installer (app/ports.js).
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Port {
+    pub id: String,
+    pub name: String,
+    pub author: String,
+    pub url: String,
+    pub repo: String,
+    pub description: String,
+    pub tags: Vec<String>,
+    pub custom: bool,
+    pub pinned: Option<String>,
+    pub options: Vec<PortOption>,
+    pub values: serde_json::Map<String, Value>,
+    pub installed: Option<Installed>,
+    pub status: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct PortOption {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub label: String,
+    pub description: String,
+    pub choices: Vec<(String, String)>,
+    pub folder: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -34,6 +66,15 @@ pub struct Settings {
     pub directories: Vec<String>,
     /// Identifiant public du joueur (sixm:…), à donner aux hôtes.
     pub uid: String,
+    pub port: String,
+    pub custom_port: CustomPort,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct CustomPort {
+    pub repo: String,
+    pub commit: String,
 }
 
 /// Serveur public annoncé sur le réseau local.
@@ -53,10 +94,12 @@ pub struct Menu {
     pub subtitle: String,
     pub color: Option<String>,
     pub items: Vec<MenuItem>,
+    /// Sous-menus à ouvrir d'emblée (ids des lignes depuis la racine).
+    pub open: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
-#[serde(default)]
+#[serde(default, rename_all = "camelCase")]
 pub struct MenuItem {
     pub id: String,
     #[serde(rename = "type")]
@@ -66,6 +109,11 @@ pub struct MenuItem {
     pub right: String,
     pub icon: String,
     pub disabled: bool,
+    pub badge: String,
+    pub badge_color: Option<String>,
+    pub confirm: bool,
+    pub placeholder: String,
+    pub max_length: u32,
     pub value: Value,
     pub options: Vec<String>,
     pub min: f64,
@@ -129,6 +177,8 @@ pub struct Session {
     pub admin: bool,
     pub menu: Option<Menu>,
     pub menu_seq: i64,
+    pub notices: Vec<Notice>,
+    pub world: Option<World>,
     pub attempt: i64,
     pub address: Option<String>,
     pub adapter: Option<String>,
@@ -140,6 +190,27 @@ pub struct Session {
     pub local: Option<Pos>,
     pub players: Vec<Player>,
     pub roster: Vec<Player>,
+}
+
+/// Notification envoyée par un mod.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Notice {
+    pub seq: i64,
+    pub title: String,
+    pub text: String,
+    pub icon: String,
+    pub color: Option<String>,
+    pub seconds: f32,
+}
+
+/// Heure (minutes depuis minuit) et météo du serveur.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct World {
+    pub minutes: i64,
+    pub weather: String,
+    pub frozen: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -237,7 +308,9 @@ pub struct Victory {
     pub progress: Option<f64>,
     pub error: Option<String>,
     pub checks: Option<Vec<Check>>,
-    pub pinned: String,
+    pub pinned: Option<String>,
+    pub name: String,
+    pub repo: String,
     pub installed: Option<Installed>,
     pub module_stale: bool,
     pub valid: bool,

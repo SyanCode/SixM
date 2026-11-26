@@ -1,4 +1,4 @@
-//! Réglages : profil, mises à jour, jeux, VIctory.
+//! Réglages : profil, mises à jour, jeux, portage.
 
 use super::host::underline_tab;
 use super::{page, Job, SettingsTab, SixmApp};
@@ -66,7 +66,7 @@ impl SixmApp {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 let mut tabs = vec![(SettingsTab::General, ic::USER_CIRCLE, "Général"), (SettingsTab::Games, ic::GAME_CONTROLLER, "Jeux")];
                 if self.st.victory.supported {
-                    tabs.push((SettingsTab::Victory, ic::WRENCH, "VIctory"));
+                    tabs.push((SettingsTab::Victory, ic::WRENCH, "Portage"));
                 }
                 for (tab, icon, label) in tabs {
                     if underline_tab(ui, icon, label, self.settings_tab == tab).clicked() {
@@ -80,7 +80,7 @@ impl SixmApp {
             match self.settings_tab {
                 SettingsTab::General => self.general(ui),
                 SettingsTab::Games => self.games(ui),
-                SettingsTab::Victory => self.victory_panel(ui, false),
+                SettingsTab::Victory => self.ports_tab(ui),
             }
         });
     }
@@ -201,7 +201,7 @@ impl SixmApp {
         if let Some(i) = remove {
             form.games.remove(i);
         }
-        section(ui, "Emplacement de VIctory", "Rempli tout seul après l'installation. Vous pouvez aussi indiquer le vôtre.", |ui| {
+        section(ui, "Programme du portage", "Rempli tout seul après l'installation du portage choisi. Vous pouvez aussi indiquer le vôtre.", |ui| {
             theme::field(ui, "victory.exe", |ui| {
                 ui.horizontal(|ui| {
                     let w = ui.available_width() - if cfg!(windows) { 130.0 } else { 0.0 };

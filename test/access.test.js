@@ -15,6 +15,12 @@ import { SixMClient } from '../client/client.js';
 import { MockAdapter } from '../client/adapters/mock.js';
 import { fetchDirectories } from '../app/discovery.js';
 
+/** Page affichée : la racine, ou le sous-menu ouvert par son chemin `open`. */
+const page = (menu) => {
+  let m = menu;
+  for (const id of menu?.open ?? []) m = m?.items.find((i) => i.id === id)?.menu;
+  return m ?? null;
+};
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'sixm-'));
 const serve = (extra = {}) => createServer({ name: 't', port: 0, tickRate: 50, ...extra });
 const client = (srv, opts = {}) => new SixMClient({
@@ -94,7 +100,7 @@ test('serveur privé : fiche publique sans joueurs, options validées', async ()
   await c.disconnect(); await srv.stop();
 });
 
-test('menus : principal, ouverture, choix, entrée réservée aux admins, menus invalides', async () => {
+test('menus : principal, ouverture, choix, entrée réservée aux admins, menus invalides', async (t) => {
   assert.throws(() => cleanMenu({ id: 'x' }), /menu invalide/);
   const m = cleanMenu({ id: 'm', items: [{ id: 'l', type: 'list', options: ['a', 'b'], value: 9 }, { id: 's', type: 'slider', min: 0, max: 10, value: -5 }, { type: 'nope', label: 'x\u0007' }] });
   assert.deepEqual([m.items[0].value, m.items[1].value, m.items[2].type, m.items[2].label], [1, 0, 'button', 'x ']);
@@ -103,13 +109,15 @@ test('menus : principal, ouverture, choix, entrée réservée aux admins, menus 
   const a = new MockAdapter(), me = createIdentity();
   const c = client(srv, { adapter: a, identity: me, name: 'Ana' });
   const other = client(srv, { name: 'Bob', identity: createIdentity() });
+  t.after(async () => { await c.disconnect(); await other.disconnect(); await srv.stop(); }); // même en échec
   await c.connect(); await other.connect();
   c.openMenu();
   await until(() => c.menu?.id === 'sixm:main', 'menu principal');
-  assert.deepEqual(c.menu.items.map((i) => i.id), ['profil', 'emotes'], 'pas d\'administration pour un joueur');
+  assert.deepEqual(c.menu.items.map((i) => i.id), ['joueurs', 'emotes', 'monde', 'profil'], 'pas d\'administration pour un joueur');
 
   c.selectMenu('sixm:main', 'emotes');
-  await until(() => c.menu?.id === 'emotes', 'sous-menu');
+  await until(() => page(c.menu)?.id === 'emotes', 'sous-menu');
+  assert.equal(c.menu.id, 'sixm:main', 'rangé dans le menu principal : Retour y ramène');
   c.selectMenu('emotes', '0');
   await until(() => a.logs.includes('* Ana salue'), 'emote envoyée');
 
@@ -127,7 +135,6 @@ test('menus : principal, ouverture, choix, entrée réservée aux admins, menus 
   srv.resources.stop('menu');
   c.openMenu();
   await until(() => a.logs.includes('Aucun menu sur ce serveur.'), 'entrées retirées avec la ressource');
-  await c.disconnect(); await srv.stop();
 });
 
 test('annuaire : inscription vérifiée, serveurs privés refusés, liste', async () => {
@@ -144,4 +151,55 @@ test('annuaire : inscription vérifiée, serveurs privés refusés, liste', asyn
   assert.deepEqual(list.map((s) => [s.address, s.name, s.tags]), [[`127.0.0.1:${pub.net.port}`, 'Public', ['FR']]]);
   assert.deepEqual(await fetchDirectories(['http://127.0.0.1:1']), [], 'annuaire injoignable');
   await pub.stop(); await priv.stop(); await dir.close();
+});
+
+test('mod menu : message privé, signalement, heure et météo, ressources, notifications', async (t) => {
+  const { cleanValue, cleanNotice, cleanWorld } = await import('../server/menus.js');
+  assert.deepEqual([cleanValue('a\u0007b'), cleanValue(NaN), cleanValue({}), cleanValue('x'.repeat(500)).length], ['a b', null, null, 200]);
+  assert.throws(() => cleanNotice({}), /vide/);
+  assert.deepEqual(cleanWorld({ minutes: -30, weather: 'acide', frozen: 1 }), { minutes: 1410, weather: 'clear', frozen: false });
+
+  const srv = await serve({ resourcesDir: 'resources', autostart: ['hello', 'menu'] });
+  const ana = createIdentity();
+  srv.access.setAdmin(playerUid(ana.publicKey), 'Ana', true);
+  const a = client(srv, { name: 'Ana', identity: ana });
+  const b = client(srv, { name: 'Bob', identity: createIdentity() });
+  t.after(async () => { await a.disconnect(); await b.disconnect(); await srv.stop(); });
+  await a.connect(); await b.connect();
+  assert.equal(a.worldNow().minutes, 720, 'heure du monde reçue à l\'arrivée');
+
+  // Message privé : saisie de texte dans le menu de Bob.
+  b.selectMenu('joueur', `msg:${a.id}`, 'rendez-vous au port');
+  await until(() => a.notices.some((n) => n.title === 'Message de Bob' && n.text === 'rendez-vous au port'), 'message reçu');
+  await until(() => b.notices.some((n) => n.title === 'Message envoyé'), 'accusé d\'envoi');
+
+  // Signalement : l'admin est prévenu et le retrouve dans son menu.
+  b.selectMenu('signaler', `${a.id}:0`);
+  await until(() => b.notices.some((n) => n.title === 'Signalement envoyé'), 'signalement');
+  b.selectMenu('signaler', `${b.id}:0`); // se signaler soi-même : ignoré
+
+  // Heure et météo : réservées aux admins, diffusées à tous.
+  b.selectMenu('monde', 'meteo', 3);
+  a.selectMenu('monde', 'meteo', 3);
+  a.selectMenu('monde', 'heure', 21);
+  await until(() => b.world?.weather === 'thunder' && b.worldNow().minutes === 21 * 60, 'monde partagé');
+  a.selectMenu('monde', 'figer', true);
+  await until(() => b.world?.frozen === true, 'heure figée');
+
+  // Administration : signalement visible, ressources redémarrées depuis le menu.
+  a.openMenu();
+  await until(() => a.menu?.items.some((i) => i.id === 'admin' && i.badge === 'ADMIN'), 'entrée admin et son badge');
+  a.selectMenu('sixm:main', 'admin');
+  await until(() => page(a.menu)?.id === 'admin', 'menu admin');
+  const reports = page(a.menu).items.find((i) => i.id === 'signalements');
+  assert.equal(reports.right, '1');
+  assert.equal(reports.menu.items[0].label, 'Ana : Triche');
+  const seq = a.menuSeq;
+  a.selectMenu('admin:ressource', 'restart:hello');
+  await until(() => a.notices.some((n) => n.text === 'hello : redémarrée'), 'ressource redémarrée');
+  await until(() => a.menuSeq > seq, 'menu rafraîchi après l\'action');
+  assert.deepEqual([a.menu.id, a.menu.open], ['sixm:main', ['admin']], 'toujours rangé dans le menu principal');
+  a.selectMenu('admin:ressource', 'stop:menu');
+  await until(() => a.notices.some((n) => n.title === 'Impossible'), 'le menu ne s\'arrête pas lui-même');
+  assert.ok(srv.resources.running.has('menu'));
 });

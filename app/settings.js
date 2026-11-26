@@ -2,8 +2,13 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createIdentity, isIdentity, playerUid } from '../server/identity.js';
+import { isRepo, PORTS } from './ports.js';
 
-const DEFAULTS = { name: 'Joueur', autoUpdate: true, target: 'demo', victory: '', games: [], favorites: [], recents: [], directories: [] };
+const DEFAULTS = {
+  name: 'Joueur', autoUpdate: true, target: 'demo', victory: '', games: [], favorites: [], recents: [], directories: [],
+  port: 'victory', portOptions: {}, customPort: { repo: '', commit: '' },
+};
+const PORT_IDS = [...PORTS.map((p) => p.id), 'custom'];
 const clean = (v, max) => String(v).replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim().slice(0, max);
 
 function normalize(raw) {
@@ -28,6 +33,16 @@ function normalize(raw) {
     // Annuaires de serveurs publics consultés par l'onglet « Publics ».
     directories: (Array.isArray(s.directories) ? s.directories : []).map((u) => clean(u ?? '', 255))
       .filter((u) => /^https?:\/\/[^\s/]+\/?$/.test(u)).slice(0, 4),
+    // Portage choisi, ses options de lancement (relues par app/ports.js), et le dépôt « au choix ».
+    port: PORT_IDS.includes(s.port) ? s.port : DEFAULTS.port,
+    portOptions: Object.fromEntries(PORT_IDS.filter((id) => s.portOptions?.[id] && typeof s.portOptions[id] === 'object').map((id) => [id,
+      Object.fromEntries(Object.entries(s.portOptions[id]).slice(0, 32)
+        .filter(([k, v]) => /^\w{1,32}$/.test(k) && (typeof v === 'boolean' || typeof v === 'string'))
+        .map(([k, v]) => [k, typeof v === 'string' ? clean(v, 1024) : v]))])),
+    customPort: {
+      repo: isRepo(s.customPort?.repo) ? s.customPort.repo : '',
+      commit: /^[0-9a-f]{40}$/.test(s.customPort?.commit) ? s.customPort.commit : '',
+    },
     // Clé du joueur : créée une fois, jamais envoyée à l'interface ni aux serveurs.
     identity: isIdentity(s.identity) ? { publicKey: s.identity.publicKey, privateKey: s.identity.privateKey } : createIdentity(),
   };

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { playerUid, verifyChallenge } from '../identity.js';
+import { cleanValue } from '../menus.js';
 
 const PING_MS = 15000;
 const MAX_BUFFERED = 1 << 20;
@@ -175,7 +176,7 @@ export class Network {
         const name = m.name.replace(/[^\p{L}\p{N}_ -]/gu, '').slice(0, 24) || 'Joueur';
         player = this.world.addPlayer(name, ws, ip, uid);
         this.send(ws, {
-          t: 'welcome', id: player.id, server: this.config.name, uid, motd: this.config.motd,
+          t: 'welcome', id: player.id, server: this.config.name, uid, motd: this.config.motd, world: this.world.state,
           tickRate: this.config.tickRate, resources: this.resources.clientBundle(),
         });
         this.sendRoster();
@@ -192,8 +193,7 @@ export class Network {
       } else if (m.t === 'menuOpen') {
         this.menus?.main(player);
       } else if (m.t === 'menu' && typeof m.menu === 'string' && typeof m.item === 'string') {
-        const value = ['boolean', 'number'].includes(typeof m.value) && (typeof m.value !== 'number' || Number.isFinite(m.value)) ? m.value : null;
-        this.menus?.select(player, m.menu.slice(0, 48), m.item.slice(0, 48), value);
+        this.menus?.select(player, m.menu.slice(0, 48), m.item.slice(0, 48), cleanValue(m.value));
       }
     });
   }

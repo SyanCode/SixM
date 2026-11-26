@@ -60,18 +60,19 @@ test('SixM de bout en bout via le bridge', async () => {
   await cv.disconnect(); bridge.close(); await srv.stop();
 });
 
-test('menus dans le jeu : la surcouche reçoit le menu et renvoie touches et choix', async () => {
+test('menus dans le jeu : la surcouche reçoit le menu et renvoie touches et choix', async (t) => {
   const srv = await createServer({ name: 'Vice', port: 0, tickRate: 50, resourcesDir: 'resources', autostart: ['hello', 'menu'] });
   const bridge = await fakeBridge();
   const va = new VictoryAdapter({ port: bridge.port, allowedBuilds: ['build-A'] });
   const cv = new SixMClient({ url: `ws://localhost:${srv.net.port}`, name: 'Vic', adapter: va, identity: createIdentity() });
+  t.after(async () => { await cv.disconnect(); bridge.close(); await srv.stop(); }); // même en échec
   await cv.connect();
-  const sent = (t) => bridge.received.filter((m) => m.t === t);
+  const sent = (type) => bridge.received.filter((m) => m.t === type);
 
   bridge.push({ t: 'menuOpen' }); // touche du menu, dans le jeu
   await until(() => sent('menu').at(-1)?.menu.id === 'sixm:main', 'menu principal envoyé à la surcouche');
   bridge.push({ t: 'menuSelect', menu: 'sixm:main', item: 'emotes', value: null });
-  await until(() => sent('menu').at(-1)?.menu.id === 'emotes', 'sous-menu');
+  await until(() => sent('menu').at(-1)?.menu.open?.[0] === 'emotes', 'sous-menu, rangé dans le menu principal');
   bridge.push({ t: 'menuSelect', menu: 'emotes', item: '1', value: null });
   await until(() => va.logs.includes('* Vic danse'), 'choix fait dans le jeu');
   bridge.push({ t: 'menuSelect', menu: 'emotes', item: 'x', value: { pas: 'un nombre' } });
@@ -83,5 +84,4 @@ test('menus dans le jeu : la surcouche reçoit le menu et renvoie touches et cho
   await until(() => cv.menu, 'rouvert');
   cv.closeMenu();
   await until(() => sent('menuClose').length >= 1, 'fermeture relayée');
-  await cv.disconnect(); bridge.close(); await srv.stop();
 });

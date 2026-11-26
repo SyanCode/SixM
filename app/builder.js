@@ -87,8 +87,12 @@ function defaultTools() {
  * qu'après une compilation réussie et vérifiée.
  */
 export class VictoryBuilder {
-  constructor(dir, { onInstalled = () => {}, tools = {}, repo = REPO, pinned = PINNED, module = MODULE, supported = process.platform === 'win32', logDir = dir } = {}) {
-    Object.assign(this, { dir, repo, pinned, supported, onInstalled, module: moduleSource(module) });
+  /**
+   * name : nom du portage dans les messages ; pinned : commit installé par défaut, ou null pour le dernier
+   * commit publié (dépôt choisi par l'utilisateur).
+   */
+  constructor(dir, { onInstalled = () => {}, tools = {}, repo = REPO, pinned = PINNED, name = 'VIctory', module = MODULE, supported = process.platform === 'win32', logDir = dir } = {}) {
+    Object.assign(this, { dir, repo, pinned, name, supported, onInstalled, module: moduleSource(module) });
     this.tools = { ...defaultTools(), ...tools };
     this.src = path.join(dir, 'src');
     this.logFile = path.join(logDir, 'victory-build.log');
@@ -116,9 +120,9 @@ export class VictoryBuilder {
   }
 
   state() {
-    const { supported, status, task, step, progress, error, checks, pinned } = this;
+    const { supported, status, task, step, progress, error, checks, pinned, name, repo } = this;
     const installed = this.installed();
-    return { supported, status, task, step, progress, error, checks, pinned, installed, moduleStale: this.moduleStale(installed), log: this.log.slice(-120) };
+    return { supported, status, task, step, progress, error, checks, pinned, name, repo, installed, moduleStale: this.moduleStale(installed), log: this.log.slice(-120) };
   }
 
   /** Contrôle des prérequis : [{ id, name, ok, detail }]. */
@@ -148,8 +152,8 @@ export class VictoryBuilder {
     });
   }
 
-  /** Installe le commit épinglé. */
-  install() { return this.#run('install', () => this.#build(async () => this.pinned)); }
+  /** Installe le commit épinglé, ou le dernier publié s'il n'y en a pas. */
+  install() { return this.#run('install', () => this.#build(async () => this.pinned ?? this.latest())); }
 
   /** Le module SixM a changé depuis la compilation. */
   moduleStale(installed = this.installed()) { return !!installed && installed.module !== this.module.id; }
@@ -157,7 +161,7 @@ export class VictoryBuilder {
   /** Recompile la même version de VIctory avec le module SixM actuel. */
   rebuild() {
     const installed = this.installed();
-    if (!installed) throw new Error('VIctory n\'est pas installé');
+    if (!installed) throw new Error(`${this.name} n'est pas installé`);
     return this.#run('rebuild', () => this.#build(async () => installed.commit));
   }
 
@@ -180,7 +184,7 @@ export class VictoryBuilder {
     if (!git) throw new Error('Git est introuvable');
     const out = await this.#capture(git, [...this.#gitSafe(), 'ls-remote', '--exit-code', this.repo, 'HEAD']);
     const sha = out.trim().split(/\s/)[0];
-    if (!SHA.test(sha)) throw new Error('le dépôt VIctory ne répond pas');
+    if (!SHA.test(sha)) throw new Error(`le dépôt de ${this.name} ne répond pas`);
     return sha;
   }
 
@@ -199,7 +203,7 @@ export class VictoryBuilder {
 
   /** Lance une opération ; une seule à la fois. Ne rejette jamais : le résultat est dans l'état. */
   #run(task, fn) {
-    if (!this.supported) throw new Error('l\'installation de VIctory demande Windows');
+    if (!this.supported) throw new Error(`l'installation de ${this.name} demande Windows`);
     if (this.busy) throw new Error('une installation est déjà en cours');
     Object.assign(this, { status: 'running', task, step: 'Préparation', progress: null, error: null, log: [], cancelled: false });
     fs.mkdirSync(this.dir, { recursive: true });
@@ -238,14 +242,14 @@ export class VictoryBuilder {
     fs.writeFileSync(tmp, JSON.stringify({ commit, exe: done, builtAt: new Date().toISOString(), module: this.module.id }, null, 2) + '\n');
     fs.renameSync(tmp, path.join(this.dir, 'state.json'));
     this.#progress('Terminé', 1);
-    this.#line(`VIctory ${commit.slice(0, 12)} : ${done}`);
+    this.#line(`${this.name} ${commit.slice(0, 12)} : ${done}`);
     this.onInstalled(done);
   }
 
   async #checkout(commit) {
     const git = [...this.tools.git(), ...this.#gitSafe()];
     const run = (...args) => this.#exec(git, args, { cwd: this.src });
-    this.#progress('Téléchargement du code de VIctory', null);
+    this.#progress(`Téléchargement du code de ${this.name}`, null);
     fs.mkdirSync(this.src, { recursive: true });
     if (!fs.existsSync(path.join(this.src, '.git'))) await run('init', '--quiet');
     // Adresse donnée à chaque fois : un dépôt local modifié ne peut pas rediriger le téléchargement.
@@ -268,7 +272,7 @@ export class VictoryBuilder {
     await this.#exec(cargo, ['fetch', '--locked'], options);
     const edit = (file, pattern, added) => {
       const text = fs.readFileSync(file, 'utf8');
-      if (text.split(pattern).length !== 2) throw new Error(`VIctory a changé : ${path.basename(file)} ne se laisse plus compléter`);
+      if (text.split(pattern).length !== 2) throw new Error(`${this.name} a changé : ${path.basename(file)} ne se laisse plus compléter`);
       fs.writeFileSync(file, text.replace(pattern, (m) => m + added));
     };
     edit(at('apps', 'victory', 'Cargo.toml'), /^\[dependencies\]\r?\n/m, 'sixm-bridge = { path = "../../crates/sixm-bridge" }\n');
@@ -281,7 +285,7 @@ export class VictoryBuilder {
     await this.#exec(cargo, ['update', '--workspace', '--offline', '--quiet'], options);
     const after = lockPackages(fs.readFileSync(at('Cargo.lock'), 'utf8'));
     if ([...after].filter((p) => !before.has(p)).join() !== 'sixm-bridge 0.1.0 ' || [...before].some((p) => !after.has(p)))
-      throw new Error('les dépendances de VIctory ont bougé : compilation refusée');
+      throw new Error(`les dépendances de ${this.name} ont bougé : compilation refusée`);
   }
 
   #cargoEnv() {

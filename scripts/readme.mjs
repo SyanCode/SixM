@@ -20,7 +20,7 @@ export const LANGUAGES = {
     features: 'Features',
     feature: [
       ['Play', 'Pick a game and a server, then press Play. Favourites, chat, players, radar. A demo mode needs no game.'],
-      ['VIctory', 'Downloads and compiles VIctory on your PC, at a pinned version, with a live log. Updates are always manual.'],
+      ['VIctory', 'Downloads and compiles VIctory, or a fork such as VIctory Belobug AMD, on your PC, at a pinned version, with a live log. Updates are always manual.'],
       ['In-game overlay', 'Chat, players, radar and mod menus on top of the game window. F7 menu, F8 to type, F9 to hide. Windows only.'],
       ['Other players', 'Their names appear in the world, at their position, through SixM\'s module for VIctory. Needs a local profile.'],
       ['Host', 'Your server in two clicks: public or private, whitelist, admins, password, bans, console.'],
@@ -51,7 +51,7 @@ export const LANGUAGES = {
     features: 'Fonctionnalités',
     feature: [
       ['Jouer', 'Choisissez un jeu et un serveur, puis Jouer. Favoris, chat, joueurs, radar. Un mode démo marche sans jeu.'],
-      ['VIctory', 'Télécharge et compile VIctory sur votre PC, à une version précise, avec journal en direct. Mise à jour toujours manuelle.'],
+      ['VIctory', 'Télécharge et compile VIctory, ou un fork comme VIctory Belobug AMD, sur votre PC, à une version précise, avec journal en direct. Mise à jour toujours manuelle.'],
       ['Surcouche en jeu', 'Chat, joueurs, radar et menus des mods par-dessus la fenêtre du jeu. F7 menu, F8 pour écrire, F9 pour masquer. Windows seulement.'],
       ['Autres joueurs', 'Leurs noms apparaissent dans le monde, à leur place, grâce au module SixM pour VIctory. Demande un profil local.'],
       ['Héberger', 'Votre serveur en deux clics : public ou privé, liste blanche, admins, mot de passe, bannissements, console.'],
@@ -82,7 +82,7 @@ export const LANGUAGES = {
     features: 'Funciones',
     feature: [
       ['Jugar', 'Elige un juego y un servidor y pulsa Jugar. Favoritos, chat, jugadores, radar. El modo demo no necesita juego.'],
-      ['VIctory', 'Descarga y compila VIctory en tu PC, en una versión fija, con registro en directo. Las actualizaciones son siempre manuales.'],
+      ['VIctory', 'Descarga y compila VIctory, o un fork como VIctory Belobug AMD, en tu PC, en una versión fija, con registro en directo. Las actualizaciones son siempre manuales.'],
       ['Superposición en el juego', 'Chat, jugadores, radar y menús de mods sobre la ventana del juego. F7 menú, F8 para escribir, F9 para ocultar. Solo Windows.'],
       ['Otros jugadores', 'Sus nombres aparecen en el mundo, en su posición, gracias al módulo de SixM para VIctory. Requiere un perfil local.'],
       ['Alojar', 'Tu servidor en dos clics: público o privado, lista blanca, admins, contraseña, bloqueos, consola.'],
@@ -113,7 +113,7 @@ export const LANGUAGES = {
     features: 'Funktionen',
     feature: [
       ['Spielen', 'Spiel und Server wählen, dann starten. Favoriten, Chat, Spieler, Radar. Der Demomodus braucht kein Spiel.'],
-      ['VIctory', 'Lädt VIctory herunter und kompiliert es auf deinem PC, in einer festen Version und mit Live-Protokoll. Aktualisiert wird immer von Hand.'],
+      ['VIctory', 'Lädt VIctory oder einen Fork wie VIctory Belobug AMD herunter und kompiliert ihn auf deinem PC, in einer festen Version und mit Live-Protokoll. Aktualisiert wird immer von Hand.'],
       ['Overlay im Spiel', 'Chat, Spieler, Radar und Mod-Menüs über dem Spielfenster. F7 Menü, F8 zum Schreiben, F9 zum Ausblenden. Nur Windows.'],
       ['Andere Spieler', 'Ihre Namen erscheinen an ihrer Position in der Welt, über das SixM-Modul für VIctory. Benötigt ein lokales Profil.'],
       ['Hosten', 'Dein Server in zwei Klicks: öffentlich oder privat, Whitelist, Admins, Passwort, Sperren, Konsole.'],
@@ -144,7 +144,7 @@ export const LANGUAGES = {
     features: 'Recursos',
     feature: [
       ['Jogar', 'Escolha um jogo e um servidor e clique em Jogar. Favoritos, chat, jogadores, radar. O modo demo não precisa de jogo.'],
-      ['VIctory', 'Baixa e compila o VIctory no seu PC, em uma versão fixa, com registro ao vivo. As atualizações são sempre manuais.'],
+      ['VIctory', 'Baixa e compila o VIctory, ou um fork como o VIctory Belobug AMD, no seu PC, em uma versão fixa, com registro ao vivo. As atualizações são sempre manuais.'],
       ['Sobreposição no jogo', 'Chat, jogadores, radar e menus de mods sobre a janela do jogo. F7 menu, F8 para escrever, F9 para ocultar. Somente Windows.'],
       ['Outros jogadores', 'Os nomes aparecem no mundo, na posição deles, pelo módulo do SixM para o VIctory. Requer um perfil local.'],
       ['Hospedar', 'Seu servidor em dois cliques: público ou privado, lista branca, admins, senha, banimentos, console.'],
@@ -175,7 +175,7 @@ export const LANGUAGES = {
     features: '功能',
     feature: [
       ['游玩', '选择游戏和服务器，然后开始。收藏、聊天、玩家列表、雷达。演示模式无需游戏。'],
-      ['VIctory', '在你的电脑上下载并编译固定版本的 VIctory，实时显示日志。更新始终由你手动触发。'],
+      ['VIctory', '在你的电脑上下载并编译固定版本的 VIctory 或其分支（如 VIctory Belobug AMD），实时显示日志。更新始终由你手动触发。'],
       ['游戏内覆盖层', '在游戏窗口上显示聊天、玩家、雷达和模组菜单。F7 菜单，F8 输入，F9 隐藏。仅限 Windows。'],
       ['其他玩家', '通过 SixM 的 VIctory 模块，在游戏世界中按位置显示其他玩家的名字。需要本地配置文件。'],
       ['托管', '两次点击即可开服：公开或私有、白名单、管理员、密码、封禁、控制台。'],
@@ -206,7 +206,7 @@ export const LANGUAGES = {
     features: '機能',
     feature: [
       ['プレイ', 'ゲームとサーバーを選んで開始。お気に入り、チャット、プレイヤー、レーダー。デモモードはゲーム不要です。'],
-      ['VIctory', 'VIctory を固定バージョンで PC にダウンロードしてコンパイルし、ログをリアルタイム表示。更新は常に手動です。'],
+      ['VIctory', 'VIctory または VIctory Belobug AMD などのフォークを固定バージョンで PC にダウンロードしてコンパイルし、ログをリアルタイム表示。更新は常に手動です。'],
       ['ゲーム内オーバーレイ', 'ゲーム画面の上にチャット、プレイヤー、レーダー、MOD メニューを表示。F7 でメニュー、F8 で入力、F9 で非表示。Windows のみ。'],
       ['他のプレイヤー', 'VIctory 用 SixM モジュールにより、他プレイヤーの名前をワールド内の位置に表示。ローカルのプロファイルが必要です。'],
       ['ホスト', '2 クリックでサーバーを作成。公開・非公開、ホワイトリスト、管理者、パスワード、BAN、コンソール。'],
@@ -237,7 +237,7 @@ export const LANGUAGES = {
     features: 'Возможности',
     feature: [
       ['Игра', 'Выберите игру и сервер и начинайте. Избранное, чат, игроки, радар. Демо-режим работает без игры.'],
-      ['VIctory', 'Скачивает и компилирует VIctory на вашем ПК в закреплённой версии, с журналом в реальном времени. Обновление только вручную.'],
+      ['VIctory', 'Скачивает и компилирует VIctory или его форк, например VIctory Belobug AMD, на вашем ПК в закреплённой версии, с журналом в реальном времени. Обновление только вручную.'],
       ['Оверлей в игре', 'Чат, игроки, радар и меню модов поверх окна игры. F7 — меню, F8 — писать, F9 — скрыть. Только Windows.'],
       ['Другие игроки', 'Их имена видны в мире, на своих местах, через модуль SixM для VIctory. Нужен локальный профиль.'],
       ['Хостинг', 'Свой сервер в два клика: публичный или приватный, белый список, админы, пароль, баны, консоль.'],

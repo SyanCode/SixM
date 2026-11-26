@@ -1,6 +1,7 @@
 // État du monde : joueurs connectés et leur position synchronisée.
 export class World {
   players = new Map(); // id -> { id, name, pos:{x,y,z,h}, socket }
+  state = { minutes: 12 * 60, weather: 'clear', frozen: false }; // heure et météo partagées
   #nextId = 1;
 
   addPlayer(name, socket, ip = '', uid = null) {

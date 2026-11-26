@@ -7,7 +7,10 @@ import { Network } from './core/network.js';
 import { BanList } from './bans.js';
 import { AccessList } from './access.js';
 import { startAnnounce } from './announce.js';
-import { MenuHub } from './menus.js';
+import { MenuHub, cleanNotice, cleanWorld } from './menus.js';
+
+// Une minute du monde toutes les deux secondes : une journée en 48 minutes, comme dans les jeux de ce genre.
+const WORLD_SECONDS_PER_MINUTE = 2;
 import { loadConfig, normalizeConfig } from './config.js';
 import { startConsole } from './console.js';
 
@@ -44,9 +47,28 @@ export async function createServer(rawConfig) {
       remove: (uid) => access.remove(uid),
       requests: () => access.data.requests.map((e) => ({ ...e })),
     },
+    // Notification en haut de l'écran du joueur (id) ou de tous (null).
+    notify: (id, notice) => {
+      const msg = { t: 'notify', notice: cleanNotice(notice) };
+      if (id === null || id === undefined) net.broadcast(msg); else net.sendToPlayer(id, msg);
+    },
+    // Heure (minutes depuis minuit) et météo partagées par tous les joueurs.
+    getWorld: () => ({ ...world.state }),
+    setWorld: (patch) => {
+      world.state = cleanWorld(patch, world.state);
+      net.broadcast({ t: 'world', world: world.state });
+      return { ...world.state };
+    },
     chat: (id, text) => {
       const msg = { t: 'event', name: 'chat', args: [String(text).slice(0, 300)] };
       if (id === null || id === undefined) net.broadcast(msg); else net.sendToPlayer(id, msg);
+    },
+    // Ressources du serveur. Une ressource ne peut pas s'arrêter elle-même depuis son propre code.
+    resources: {
+      list: () => resources.list().map((name) => ({ name, running: resources.running.has(name) })),
+      start: (name) => resources.start(String(name)),
+      stop: (name) => { if (name === resource) throw new Error('une ressource ne s\'arrête pas elle-même'); return resources.stop(String(name)); },
+      restart: (name) => { if (name === resource) throw new Error('une ressource ne se redémarre pas elle-même'); resources.restart(String(name)); },
     },
     // Menus : entrée du menu principal, ouverture et choix.
     addMenu: (entry) => menus.add(resource, entry),
@@ -59,6 +81,7 @@ export async function createServer(rawConfig) {
   net = new Network({ port: config.port, world, events, config, resources, bans, access });
   menus = net.menus = new MenuHub({ net, events, config });
   events.on('resourceStop', (name) => menus.removeOwner(name));
+  events.on('playerDropped', (p) => menus.forget(p));
 
   // "*" : tous les mods déposés dans le dossier des ressources.
   const autostart = config.autostart.includes('*') ? resources.list() : config.autostart;
@@ -70,10 +93,18 @@ export async function createServer(rawConfig) {
   const extra = [config.password && 'mot de passe', config.whitelist && 'liste blanche', config.visibility === 'private' && 'privé'].filter(Boolean);
   console.log(`[sixm] "${config.name}" en écoute sur ws://localhost:${port}${extra.length ? ` (${extra.join(', ')})` : ''}`);
   const announce = startAnnounce({ config, port });
+  const clock = setInterval(() => {
+    if (world.state.frozen) return;
+    world.state = { ...world.state, minutes: (world.state.minutes + 1) % 1440 };
+    // Les clients avancent l'heure eux-mêmes ; un rappel par heure du monde corrige les écarts.
+    if (world.state.minutes % 60 === 0) net.broadcast({ t: 'world', world: world.state });
+  }, WORLD_SECONDS_PER_MINUTE * 1000);
+  clock.unref();
   return {
     config, events, world, resources, net, bans, access, menus,
     stop: async () => {
       announce.stop();
+      clearInterval(clock);
       for (const r of [...resources.running.keys()]) resources.stop(r);
       await net.stop();
     },

@@ -340,7 +340,7 @@ test('identité, liste blanche et menus depuis l\'application', async () => with
   await until(async () => (await state()).session.menu?.id === 'sixm:main', 'menu principal');
   assert.ok((await state()).session.menu.items.some((i) => i.id === 'admin'), 'admin : administration visible');
   await post('/api/menu/select', { menu: 'sixm:main', item: 'profil' });
-  await until(async () => (await state()).session.menu?.id === 'profil', 'menu profil');
+  await until(async () => (await state()).session.menu?.open?.[0] === 'profil', 'menu profil, dans le menu principal');
   await post('/api/menu/close');
   assert.equal((await state()).session.menu, null);
   await post('/api/disconnect');

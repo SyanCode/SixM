@@ -8,6 +8,7 @@ import { linkSupported, pickPath, startLink } from '../client/link.js';
 import { isExe, VictoryBuilder } from './builder.js';
 import { Hosts, lanAddress } from './hosts.js';
 import { Discovery, fetchDirectories } from './discovery.js';
+import { cleanOptions, customPort, isRepo, portEnv, PORTS } from './ports.js';
 import { findVictory, Launcher, resolveGame } from './launcher.js';
 import { Session } from './session.js';
 import { Settings } from './settings.js';
@@ -50,24 +51,47 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
     profiles: path.join(dataDir, 'profiles'),
     onExit: (error) => { if (session.adapterName === 'victory') session.disconnect(error ?? 'le jeu est fermé'); },
   });
-  const victory = new VictoryBuilder(path.join(dataDir, 'victory'), {
-    logDir: path.join(dataDir, 'logs'), onInstalled: (exe) => settings.update({ victory: exe }), ...builderOptions,
-  });
+  // Portages : un dossier et une compilation par projet ; un seul compile à la fois.
+  const ports = () => [...PORTS, customPort(settings.value.customPort)];
+  const portOf = (id) => ports().find((p) => p.id === id) ?? PORTS[0];
+  const builders = new Map(); // clé : id (et dépôt pour « au choix ») -> VictoryBuilder
+  const builder = (id) => {
+    const port = portOf(id);
+    const key = port.custom ? `custom ${port.repo} ${port.pinned}` : port.id;
+    if (!builders.has(key)) {
+      builders.set(key, new VictoryBuilder(port.id === 'victory' ? path.join(dataDir, 'victory') : path.join(dataDir, 'ports', port.id), {
+        name: port.name, repo: port.repo, pinned: port.pinned, logDir: path.join(dataDir, 'logs'),
+        // Installé : devient le programme lancé, si ce portage est toujours celui choisi.
+        onInstalled: (exe) => { if (settings.value.port === port.id) settings.update({ victory: exe }); },
+        ...builderOptions,
+      }));
+    }
+    return builders.get(key);
+  };
+  const current = () => builder(settings.value.port);
+  const anyBusy = () => [...builders.values()].some((b) => b.busy);
+  const startBuild = (fn) => {
+    if (anyBusy()) throw new Error('une installation est déjà en cours');
+    if (settings.value.port === 'custom' && !isRepo(portOf('custom').repo)) throw new Error('indiquez d\'abord le dépôt du portage');
+    fn(current());
+  };
   const victoryValid = () => isExe(settings.value.victory);
+  const launchEnv = () => portEnv(portOf(settings.value.port), settings.value.portOptions[settings.value.port]);
+  const victory = current();
   if (!victoryValid() && victory.supported) {
     const known = victory.installed();
     // Déjà compilé : on le reprend. Sinon on regarde seulement ce qui manque, rien n'est lancé.
     if (known) settings.update({ victory: known.exe });
     else victory.check().catch((e) => console.error('[victory]', e.message));
   }
-  const quiet = () => session.status === 'idle' && !victory.busy && !launcher.pid
+  const quiet = () => session.status === 'idle' && !anyBusy() && !launcher.pid
     && ![...hosts.running.values()].some((r) => ['starting', 'running', 'stopping'].includes(r.status));
   const updater = new Updater(dataDir, { canApply: quiet, onRestart, ...updaterOptions });
   /** Cherche puis applique ; VIctory est recompilé si SixM a changé son module. */
   const autoUpdateStep = async () => {
     if (!settings.value.autoUpdate) return;
     if (updater.status !== 'available') await updater.check();
-    if (!await updater.apply() && quiet()) victory.autoRebuild();
+    if (!await updater.apply() && quiet()) current().autoRebuild();
   };
   const tryUpdate = () => autoUpdateStep().catch((e) => console.error('[update]', e.message));
   const updateTimer = autoUpdate ? setInterval(tryUpdate, 30 * 60000) : null;
@@ -101,7 +125,7 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
       .then(async (ok) => {
         if (!ok) return;
         settings.remember(address);
-        if (game && !launcher.pid) launcher.launch(settings.value.victory, game);
+        if (game && !launcher.pid) launcher.launch(settings.value.victory, game, launchEnv());
         if (game) session.useModule(launcher.bridge);
         if (victory) await attach();
       })
@@ -114,7 +138,34 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
   }, 3000);
 
   const routes = {
-    'GET /api/state': async () => ({ settings: settings.public(), discovered: discovery.list(), session: session.state(), hosts: hosts.list(), lan: await lanAddress(), game: launcher.state(), linkSupported, victory: { ...victory.state(), valid: victoryValid() }, update: updater.state() }),
+    'GET /api/state': async () => ({ settings: settings.public(), discovered: discovery.list(), session: session.state(), hosts: hosts.list(), lan: await lanAddress(), game: launcher.state(), linkSupported, victory: { ...current().state(), valid: victoryValid() }, update: updater.state(),
+      ports: ports().map((p) => {
+        const b = p.custom && !isRepo(p.repo) ? null : builder(p.id);
+        return {
+          id: p.id, name: p.name, author: p.author, url: p.url, repo: p.repo, description: p.description, tags: p.tags, custom: !!p.custom,
+          pinned: p.pinned, options: p.options.map(({ on, off, env, ...o }) => o), values: cleanOptions(p, settings.value.portOptions[p.id]),
+          installed: b?.installed() ?? null, status: b?.status ?? 'idle',
+        };
+      }),
+    }),
+    'POST /api/ports/select': ({ id }) => {
+      if (!ports().some((p) => p.id === id)) throw new Error('portage inconnu');
+      // Le programme lancé suit le portage choisi : le sien s'il est installé.
+      const exe = isRepo(portOf(id).repo) ? builder(id).installed()?.exe ?? '' : '';
+      settings.update({ port: id, victory: exe });
+      return settings.public();
+    },
+    'POST /api/ports/options': ({ id, values }) => {
+      const port = ports().find((p) => p.id === id);
+      if (!port) throw new Error('portage inconnu');
+      settings.update({ portOptions: { ...settings.value.portOptions, [id]: cleanOptions(port, values) } });
+    },
+    'POST /api/ports/custom': ({ repo = '', commit = '' }) => {
+      const r = String(repo).trim().replace(/\/+$/, ''), c = String(commit).trim().toLowerCase();
+      if (r && !isRepo(r)) throw new Error('adresse attendue : https://github.com/propriétaire/dépôt');
+      if (c && !/^[0-9a-f]{40}$/.test(c)) throw new Error('commit attendu : 40 caractères hexadécimaux, ou rien pour le dernier');
+      settings.update({ customPort: { repo: r, commit: c } });
+    },
     'POST /api/settings': ({ name, target, victory, games, directories, autoUpdate: auto }) => {
       settings.update({
         ...(auto !== undefined && { autoUpdate: auto === true }),
@@ -138,21 +189,21 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
       if (!quiet()) throw new Error('quittez la partie et arrêtez vos serveurs d\'abord');
       updater.apply();
     },
-    'POST /api/victory/rebuild': () => { victory.rebuild(); },
+    'POST /api/victory/rebuild': () => startBuild((b) => b.rebuild()),
     'POST /api/profiles': () => { fs.mkdirSync(launcher.profiles, { recursive: true }); return openExternal(launcher.profiles); },
     'POST /api/game/launch': async () => {
       const game = selectedGame();
       if (!game) throw new Error('choisissez une installation du jeu');
       await launcher.prepare();
-      launcher.launch(settings.value.victory, game);
+      launcher.launch(settings.value.victory, game, launchEnv());
     },
     'POST /api/game/stop': () => launcher.stop(),
-    'POST /api/victory/check': async () => { await victory.check(); },
-    'POST /api/victory/install': () => { victory.install(); },
-    'POST /api/victory/update': () => { victory.update(); },
-    'POST /api/victory/latest': async () => ({ commit: await victory.latest() }),
-    'POST /api/victory/tool': ({ id }) => { victory.installTool(id); },
-    'POST /api/victory/cancel': () => victory.cancel(),
+    'POST /api/victory/check': async () => { await current().check(); },
+    'POST /api/victory/install': () => startBuild((b) => b.install()),
+    'POST /api/victory/update': () => startBuild((b) => b.update()),
+    'POST /api/victory/latest': async () => ({ commit: await current().latest() }),
+    'POST /api/victory/tool': ({ id }) => startBuild((b) => b.installTool(id)),
+    'POST /api/victory/cancel': () => { for (const b of builders.values()) b.cancel(); },
     'POST /api/victory/storage': () => openExternal('ms-settings:storagesense'),
     'POST /api/favorite': ({ address, label }) => { settings.toggleFavorite(String(address), label); return settings.public(); },
     'POST /api/query': async ({ address }) => {
@@ -239,7 +290,7 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
   return {
     origin, token, settings, hosts, session, launcher,
     get link() { return link; },
-    victory, updater,
+    get victory() { return current(); }, updater,
     /** Rien en cours et plus aucune fenêtre ouverte depuis `ms`. */
     idleFor: (ms) => Date.now() - lastSeen > ms && quiet() && !updater.busy,
     url: `${origin}/#${token}`,
@@ -247,7 +298,7 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
       clearInterval(attachTimer);
       discovery.stop();
       clearInterval(updateTimer);
-      await victory.close();
+      await Promise.all([...builders.values()].map((b) => b.close()));
       await session.disconnect();
       await link?.stop();
       await hosts.stopAll();

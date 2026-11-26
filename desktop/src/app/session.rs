@@ -54,8 +54,12 @@ impl SixmApp {
                         ui.label(theme::title(&server, 20.0));
                         ui.horizontal(|ui| {
                             theme::pill(ui, "Connecté", GREEN);
-                            let mode = if s.adapter.as_deref() == Some("victory") { "VIctory" } else { "Démo, sans jeu" };
+                            let mode = if s.adapter.as_deref() == Some("victory") { self.port_name() } else { "Démo, sans jeu".to_string() };
                             ui.label(theme::muted(format!("{}  ·  {}", s.address.clone().unwrap_or_default(), mode)));
+                            // Heure et météo du serveur.
+                            if let Some((text, icon)) = self.world_label() {
+                                ui.label(RichText::new(format!("·   {icon}  {text}")).font(theme::fs(13.0)).color(TEXT));
+                            }
                         });
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

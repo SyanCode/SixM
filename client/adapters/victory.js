@@ -78,6 +78,7 @@ export class VictoryAdapter extends GameAdapter {
             if (this.pid) this.#send({ t: 'target', pid: this.pid });
             if (this.roster) this.#send(this.roster);
             if (this.menu) this.#send({ t: 'menu', menu: this.menu });
+            if (this.world) this.setWorld(this.world);
             for (const [id, r] of this.remotes) this.#send({ t: 'setRemote', id, name: r.name, ...r.pos });
             resolve();
           } else if (ready && m.t === 'localPlayer' && [m.x, m.y, m.z, m.h].every(Number.isFinite)) {
@@ -153,6 +154,13 @@ export class VictoryAdapter extends GameAdapter {
     if (!menu && !this.menu) return;
     this.menu = menu;
     this.#send(menu ? { t: 'menu', menu } : { t: 'menuClose' });
+  }
+  /** Notification d'un mod, affichée par la surcouche. */
+  notify(notice) { this.#send({ t: 'notify', ...notice }); }
+  /** Heure et météo du serveur : affichées par la surcouche, appliquées par un portage qui sait le faire. */
+  setWorld(world) {
+    this.world = world;
+    this.#send({ t: 'world', minutes: world.minutes, weather: world.weather, frozen: world.frozen });
   }
   log(text) { this.logs.push(text); this.#send({ t: 'log', text }); console.log(`[game] ${text}`); }
   async shutdown() { this.closing = true; this.module?.stop(); (this.sock ?? this.pending)?.end(); }

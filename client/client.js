@@ -2,7 +2,7 @@ import WebSocket from 'ws';
 import { PositionBuffer } from './interpolation.js';
 import { ScriptSandbox } from './sandbox.js';
 import { signChallenge } from '../server/identity.js';
-import { cleanMenu } from '../server/menus.js';
+import { cleanMenu, cleanNotice, cleanValue, cleanWorld } from '../server/menus.js';
 
 const samePos = (a, b) => a && a.x === b.x && a.y === b.y && a.z === b.z && a.h === b.h;
 const isPos = (p) => p && [p.x, p.y, p.z, p.h].every(Number.isFinite);
@@ -27,6 +27,9 @@ export class SixMClient {
     this.uid = null; // identifiant vérifié par le serveur
     this.menu = null; // menu ouvert par le serveur
     this.menuSeq = 0;
+    this.notices = []; // notifications récentes : { seq, at, ...notice }
+    this.noticeSeq = 0;
+    this.world = null; // { minutes, weather, frozen, at } : heure reçue et moment de réception
   }
 
   async connect() {
@@ -40,9 +43,7 @@ export class SixMClient {
       // Menus pilotés depuis le jeu (surcouche) : mêmes messages que depuis la fenêtre de SixM.
       this.adapter.onMenuOpen = () => this.openMenu();
       this.adapter.onMenuClose = () => this.closeMenu();
-      this.adapter.onMenuSelect = (menu, item, value) => {
-        if (['boolean', 'number', 'object'].includes(typeof value)) this.selectMenu(clean(menu, 48), clean(item, 48), value === null || typeof value !== 'object' ? value : null);
-      };
+      this.adapter.onMenuSelect = (menu, item, value) => this.selectMenu(clean(menu, 48), clean(item, 48), value);
       await this.#handshake();
     } catch (e) {
       this.ws?.terminate();
@@ -108,7 +109,7 @@ export class SixMClient {
   /** Touche Menu : le serveur répond par son menu principal. */
   openMenu() { this.#send({ t: 'menuOpen' }); }
   /** Choix dans un menu : bouton validé, case cochée, liste ou curseur changé. */
-  selectMenu(menu, item, value = null) { this.#send({ t: 'menu', menu: String(menu), item: String(item), value }); }
+  selectMenu(menu, item, value = null) { this.#send({ t: 'menu', menu: String(menu), item: String(item), value: cleanValue(value) }); }
   closeMenu() {
     this.menu = null;
     this.menuSeq++;
@@ -133,6 +134,20 @@ export class SixMClient {
     this.sandbox?.dispose();
   }
 
+  #setWorld(w) {
+    if (!w || typeof w !== 'object') return;
+    this.world = { ...cleanWorld(w), at: Date.now() };
+    this.adapter.setWorld?.(this.world);
+  }
+
+  /** Heure du monde maintenant (le serveur avance d'une minute toutes les 2 s). */
+  worldNow() {
+    if (!this.world) return null;
+    const { minutes, weather, frozen, at } = this.world;
+    const now = frozen ? minutes : (minutes + Math.floor((Date.now() - at) / 2000)) % 1440;
+    return { minutes: now, weather, frozen };
+  }
+
   #send(m) { if (this.ws.readyState === 1) this.ws.send(JSON.stringify(m)); }
 
   #render() {
@@ -154,6 +169,7 @@ export class SixMClient {
       this.uid = typeof m.uid === 'string' ? clean(m.uid, 40) : null;
       this.sandbox.load(m.resources);
       if (typeof m.motd === 'string' && m.motd.trim()) this.adapter.log(clean(m.motd, 256));
+      if (m.world) this.#setWorld(m.world);
     } else if (m.t === 'snapshot') {
       if (!Array.isArray(m.players)) return;
       const now = performance.now();
@@ -185,6 +201,14 @@ export class SixMClient {
       this.adapter.setMenu?.(this.menu);
     } else if (m.t === 'menuClose') {
       this.closeMenu();
+    } else if (m.t === 'notify') {
+      let notice;
+      try { notice = cleanNotice(m.notice); } catch { return; }
+      this.notices.push({ seq: ++this.noticeSeq, at: Date.now(), ...notice });
+      if (this.notices.length > 20) this.notices.shift();
+      this.adapter.notify?.(notice);
+    } else if (m.t === 'world') {
+      this.#setWorld(m.world);
     } else if (m.t === 'kick') {
       this.kickReason = clean(m.reason);
       this.adapter.log(`Déconnecté: ${this.kickReason}`);

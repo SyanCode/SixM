@@ -65,8 +65,7 @@ export class Session {
   openMenu() { this.#live().openMenu(); }
   closeMenu() { this.#live().closeMenu(); }
   selectMenu(menu, item, value) {
-    const v = ['boolean', 'number'].includes(typeof value) ? value : null;
-    this.#live().selectMenu(String(menu).slice(0, 48), String(item).slice(0, 48), v);
+    this.#live().selectMenu(String(menu).slice(0, 48), String(item).slice(0, 48), value);
   }
 
   #live() {
@@ -81,6 +80,7 @@ export class Session {
       uid: connected ? client.uid : null,
       admin: connected ? !!client.roster.find((p) => p.id === client.id)?.admin : false,
       menu: connected ? client.menu : null, menuSeq: connected ? client.menuSeq : 0,
+      notices: connected ? client.notices : [], world: connected ? client.worldNow() : null,
       status: this.status, attempt: this.attempt, address: this.address, adapter: this.adapterName, error: this.error, log: this.log,
       serverName: connected ? client.serverName : null,
       id: connected ? client.id : null,

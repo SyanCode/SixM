@@ -3,6 +3,7 @@
 mod host;
 mod menu;
 mod play;
+mod ports;
 mod session;
 mod settings;
 mod victory;
@@ -119,6 +120,13 @@ pub struct SixmApp {
     pub host_form: Option<(String, host::HostForm)>,
     wanted: Vec<String>,
     pub menu: Option<menu::MenuView>,
+    /// Notifications des mods affichées, dernière reçue, premier état lu.
+    pub notices: Vec<(api::Notice, f64)>,
+    pub notice_seen: i64,
+    pub notices_ready: bool,
+    /// Formulaires de l'onglet Portage : options du portage choisi, dépôt au choix.
+    pub port_form: Option<(String, serde_json::Map<String, Value>)>,
+    pub custom_form: Option<(String, String)>,
     /// Serveurs des annuaires publics, et le moment où ils ont été lus.
     pub listed: Vec<api::Listed>,
     pub listed_at: Option<Instant>,
@@ -190,6 +198,11 @@ impl SixmApp {
             host_form: None,
             wanted: Vec::new(),
             menu: None,
+            notices: Vec::new(),
+            notice_seen: 0,
+            notices_ready: false,
+            port_form: None,
+            custom_form: None,
             listed: Vec::new(),
             listed_at: None,
             host_uid: String::new(),
@@ -348,6 +361,11 @@ impl SixmApp {
         });
     }
 
+    /// Nom du portage choisi (VIctory, un fork…).
+    pub fn port_name(&self) -> String {
+        self.st.ports.iter().find(|p| p.id == self.st.settings.port).map(|p| p.name.clone()).unwrap_or_else(|| "VIctory".into())
+    }
+
     pub fn can_solo(&self) -> bool {
         self.st.settings.games.iter().any(|g| g.id == self.st.settings.target)
     }
@@ -356,7 +374,7 @@ impl SixmApp {
         let s = &self.st.settings;
         match s.target.as_str() {
             "demo" | "" => "Démo, sans jeu".into(),
-            "attach" => "VIctory déjà ouvert".into(),
+            "attach" => format!("{} déjà ouvert", self.port_name()),
             t => s.games.iter().find(|g| g.id == t).map(|g| g.name.clone()).unwrap_or_default(),
         }
     }
@@ -403,8 +421,8 @@ impl SixmApp {
         let v = &self.st.victory;
         if self.last_build == "running" && v.status == "done" {
             let t = v.task.clone().unwrap_or_default();
-            let msg = if ["install", "update", "rebuild"].contains(&t.as_str()) { "VIctory est installé" } else { "Installation terminée" };
-            self.toast(msg, false);
+            let msg = if ["install", "update", "rebuild"].contains(&t.as_str()) { format!("{} est installé", self.port_name()) } else { "Installation terminée".into() };
+            self.toast(&msg, false);
         }
         self.last_build = self.st.victory.status.clone();
 
@@ -535,7 +553,7 @@ impl SixmApp {
         let mut options: Vec<(String, String)> = vec![("demo".into(), "Démo, sans jeu".into())];
         options.extend(s.games.iter().map(|g| (g.id.clone(), g.name.clone())));
         if self.st.link_supported {
-            options.push(("attach".into(), "VIctory déjà ouvert".into()));
+            options.push(("attach".into(), format!("{} déjà ouvert", self.port_name())));
         }
         let current = s.target.clone();
         let mut chosen = current.clone();
@@ -787,6 +805,9 @@ impl eframe::App for SixmApp {
                 View::Settings => self.settings(ui),
             }
         });
+        if self.have_state {
+            self.notices_ui(&ctx);
+        }
         self.connecting_overlay(&ctx);
         self.dialogs(&ctx);
         self.toasts_ui(&ctx);

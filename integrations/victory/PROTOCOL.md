@@ -36,7 +36,7 @@ connecte comme client. Le bridge lit/écrit l'état du jeu ; le serveur SixM ne 
 
 - `{"t":"chat","text"}` — message écrit par le joueur depuis le jeu.
 - `{"t":"menuOpen"}` — touche du menu ; `{"t":"menuClose"}` — menu fermé dans le jeu.
-- `{"t":"menuSelect","menu","item","value"}` — choix dans un menu (`value` : `null`, booléen ou nombre).
+- `{"t":"menuSelect","menu","item","value"}` — choix dans un menu (`value` : `null`, booléen, nombre ou texte).
 
 ## Adaptateur → bridge
 - `{"t":"view","m":[16],"x","y","z"}` — caméra du jeu et position locale, pour placer les noms.
@@ -47,6 +47,9 @@ connecte comme client. Le bridge lit/écrit l'état du jeu ; le serveur SixM ne 
 - `{"t":"log","text"}` — chat / notifications à afficher.
 - `{"t":"menu","menu"}` — menu d'un mod à dessiner (forme : docs/MENUS.md) ; `{"t":"menuClose"}` le ferme.
   Les sous-menus sont parcourus dans le bridge.
+- `{"t":"notify","title","text","color","seconds"}` — notification à afficher.
+- `{"t":"world","minutes","weather","frozen"}` — heure et météo du serveur. Un portage qui sait les appliquer peut
+  le faire ; SixM Link les affiche.
 
 ## Règles (alignées sur docs/asset-policy.md de VIctory)
 - Les offsets et signatures propres à un build vivent dans un **profil local hors dépôt**, sous des
