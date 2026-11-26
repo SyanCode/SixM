@@ -42,7 +42,7 @@ SixM 是一个与游戏无关的多人联机和模组框架，理念类似 FiveM
 
 程序未签名，Windows SmartScreen 可能会发出警告。`SHA256SUMS.txt` 列出了文件校验和。
 
-从源码运行：Windows 上使用 `SixM.bat`，其他系统先 `npm install` 再 `npm run app`。需要 [Node.js](https://nodejs.org) 20.15 或更高版本。
+从源码运行：Windows 上使用 `SixM.bat`，其他系统先 `npm install` 再 `npm run app`。需要 [Node.js](https://nodejs.org) 20.15 或更高版本。原生界面：在 `desktop/` 中运行 `cargo build --release`（否则打开网页界面）。
 
 ## 快速开始
 

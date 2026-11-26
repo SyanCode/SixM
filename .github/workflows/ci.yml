@@ -22,3 +22,5 @@ jobs:
           node-version: 24
       - run: npm ci --ignore-scripts
       - run: npm run test:ci
+      - name: Interface native
+        run: cargo build --locked --manifest-path desktop/Cargo.toml

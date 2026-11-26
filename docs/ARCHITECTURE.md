@@ -3,7 +3,8 @@
 ```
 SixM.bat                  lance l'interface sous Windows
 app/server.js             interface locale : API sur 127.0.0.1, jeton par session
-app/ui/                   pages de l'interface (sans dépendance)
+desktop/                  interface native en Rust (egui) : fenêtre de SixM, parle à app/server.js
+app/ui/                   interface web, utilisée si l'interface native manque (SIXM_WEB_UI=1 pour la forcer)
 app/session.js, hosts.js  partie en cours ; serveurs hébergés
 app/builder.js            télécharge et compile VIctory (git, cargo), sans code de VIctory ici
 app/updater.js            mise à jour de SixM depuis GitHub
@@ -28,6 +29,13 @@ client/sandbox.js         scripts client isolés (QuickJS/WebAssembly)
 client/adapter.js         contrat GameAdapter  <-- seule partie dépendante du jeu
 client/adapters/mock.js   adaptateur de test
 ```
+
+## Interface native
+`desktop/` est un programme Rust (eframe/egui, rendu OpenGL) qui dessine toute l'interface. Il ne contient aucune
+logique de jeu : il lit `/api/state` toutes les 600 ms et appelle les mêmes routes que l'interface web, avec le jeton
+de session. `app/window.js` le lance en lui passant l'adresse dans `SIXM_URL` ; lancé seul, il retrouve SixM par
+`~/SixM/app.json` ou le démarre (`node bin/sixm.js app --no-open`). Compilation : `cargo build --release` dans
+`desktop/` (l'installateur le fait). Police Inter embarquée (OFL, `desktop/assets/Inter-LICENSE.txt`).
 
 ## Installer VIctory
 `app/builder.js` clone le dépôt public dans `~/SixM/victory/src` au commit `PINNED` et lance

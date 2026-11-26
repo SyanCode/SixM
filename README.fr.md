@@ -42,7 +42,7 @@ SixM est un framework multijoueur et modding agnostique du jeu, dans l'esprit de
 
 Le programme n'est pas signé : Windows SmartScreen peut afficher un avertissement. `SHA256SUMS.txt` donne les empreintes des fichiers.
 
-Depuis le code : `SixM.bat` sous Windows, sinon `npm install` puis `npm run app`. Demande [Node.js](https://nodejs.org) 20.15 ou plus.
+Depuis le code : `SixM.bat` sous Windows, sinon `npm install` puis `npm run app`. Demande [Node.js](https://nodejs.org) 20.15 ou plus. Interface native : `cargo build --release` dans `desktop/` (sinon l'interface web s'ouvre).
 
 ## Démarrage
 

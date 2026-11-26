@@ -72,9 +72,14 @@ for (const f of fs.readdirSync(dist)) if (/^(SixM|SHA256SUMS|payload)/.test(f)) 
 
 const launcher = path.join(dist, 'SixM.exe');
 compile('Launcher.cs', launcher, {});
+// Interface native (Rust) : ouverte par app/window.js à la place du navigateur.
+const desktop = path.join(root, 'desktop');
+execFileSync('cargo', ['build', '--release', '--locked', '--manifest-path', path.join(desktop, 'Cargo.toml')], { stdio: 'inherit' });
 const files = [
   { name: 'SixM.exe', data: fs.readFileSync(launcher) },
   { name: 'node/node.exe', data: await nodeExe() },
+  { name: 'app/desktop/sixm-ui.exe', data: fs.readFileSync(path.join(desktop, 'target', 'release', 'sixm-ui.exe')) },
+  { name: 'app/desktop/Inter-LICENSE.txt', data: fs.readFileSync(path.join(desktop, 'assets', 'Inter-LICENSE.txt')) },
   { name: 'node/LICENSE', data: await download(`https://raw.githubusercontent.com/nodejs/node/v${runtime.version}/LICENSE`) },
   ...['package.json', 'server.json'].map((f) => ({ name: `app/${f}`, data: fs.readFileSync(path.join(root, f)) })),
   ...['app', 'bin', 'client', 'link', 'resources', 'server'].flatMap((d) => walk(path.join(root, d), `app/${d}`, [])),

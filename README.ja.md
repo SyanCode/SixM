@@ -42,7 +42,7 @@ SixM は、FiveM の考え方に沿った、ゲームに依存しないマルチ
 
 プログラムは署名されていないため、Windows SmartScreen が警告を表示することがあります。`SHA256SUMS.txt` にチェックサムがあります。
 
-ソースから：Windows では `SixM.bat`、それ以外は `npm install` の後に `npm run app`。[Node.js](https://nodejs.org) 20.15 以降が必要です。
+ソースから：Windows では `SixM.bat`、それ以外は `npm install` の後に `npm run app`。[Node.js](https://nodejs.org) 20.15 以降が必要です。ネイティブ画面：`desktop/` で `cargo build --release`（なければ Web 画面が開きます）。
 
 ## はじめに
 

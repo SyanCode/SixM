@@ -42,7 +42,7 @@ SixM is a game-agnostic multiplayer and modding framework in the spirit of FiveM
 
 The program is not signed, so Windows SmartScreen may show a warning. `SHA256SUMS.txt` lists the file checksums.
 
-From source: `SixM.bat` on Windows, or `npm install` then `npm run app`. Needs [Node.js](https://nodejs.org) 20.15 or later.
+From source: `SixM.bat` on Windows, or `npm install` then `npm run app`. Needs [Node.js](https://nodejs.org) 20.15 or later. Native interface: `cargo build --release` in `desktop/` (otherwise the web interface opens).
 
 ## Getting started
 

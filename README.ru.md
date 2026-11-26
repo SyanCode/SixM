@@ -42,7 +42,7 @@ SixM — не зависящий от игры фреймворк для мул�
 
 Программа не подписана, поэтому Windows SmartScreen может показать предупреждение. Контрольные суммы — в `SHA256SUMS.txt`.
 
-Из исходников: `SixM.bat` в Windows, иначе `npm install`, затем `npm run app`. Нужен [Node.js](https://nodejs.org) 20.15 или новее.
+Из исходников: `SixM.bat` в Windows, иначе `npm install`, затем `npm run app`. Нужен [Node.js](https://nodejs.org) 20.15 или новее. Нативный интерфейс: `cargo build --release` в `desktop/` (иначе откроется веб-интерфейс).
 
 ## Начало работы
 

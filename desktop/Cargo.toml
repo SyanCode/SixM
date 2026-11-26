@@ -1,0 +1,29 @@
+[package]
+name = "sixm-desktop"
+description = "SixM: native launcher interface (talks to the local SixM API)."
+version = "0.3.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "sixm-ui"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.37", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "glow", "wayland", "x11"] }
+egui-phosphor = { version = "0.14", features = ["regular", "fill", "bold"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "3", default-features = false, features = ["json"] }
+
+[target.'cfg(windows)'.dependencies]
+rfd = { version = "0.15", default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"

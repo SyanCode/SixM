@@ -16,7 +16,7 @@ export const LANGUAGES = {
     download: 'Download', downloadCta: 'Download for Windows',
     files: { head: ['File', 'For'], setup: 'Installer. Node.js included, no administrator rights', portable: 'No installation: run `SixM.exe`', server: `Server only, for hosting. Needs ${NODE}` },
     unsigned: 'The program is not signed, so Windows SmartScreen may show a warning. `SHA256SUMS.txt` lists the file checksums.',
-    source: `From source: \`SixM.bat\` on Windows, or \`npm install\` then \`npm run app\`. Needs ${NODE} 20.15 or later.`,
+    source: `From source: \`SixM.bat\` on Windows, or \`npm install\` then \`npm run app\`. Needs ${NODE} 20.15 or later. Native interface: \`cargo build --release\` in \`desktop/\` (otherwise the web interface opens).`,
     features: 'Features',
     feature: [
       ['Play', 'Pick a game and a server, then press Play. Favourites, chat, players, radar. A demo mode needs no game.'],
@@ -46,7 +46,7 @@ export const LANGUAGES = {
     download: 'Télécharger', downloadCta: 'Télécharger pour Windows',
     files: { head: ['Fichier', 'Pour'], setup: 'Installateur. Node.js inclus, sans droits d\'administrateur', portable: 'Sans installation : lancez `SixM.exe`', server: `Serveur seul, pour un hébergement. Demande ${NODE}` },
     unsigned: 'Le programme n\'est pas signé : Windows SmartScreen peut afficher un avertissement. `SHA256SUMS.txt` donne les empreintes des fichiers.',
-    source: `Depuis le code : \`SixM.bat\` sous Windows, sinon \`npm install\` puis \`npm run app\`. Demande ${NODE} 20.15 ou plus.`,
+    source: `Depuis le code : \`SixM.bat\` sous Windows, sinon \`npm install\` puis \`npm run app\`. Demande ${NODE} 20.15 ou plus. Interface native : \`cargo build --release\` dans \`desktop/\` (sinon l'interface web s'ouvre).`,
     features: 'Fonctionnalités',
     feature: [
       ['Jouer', 'Choisissez un jeu et un serveur, puis Jouer. Favoris, chat, joueurs, radar. Un mode démo marche sans jeu.'],
@@ -76,7 +76,7 @@ export const LANGUAGES = {
     download: 'Descargar', downloadCta: 'Descargar para Windows',
     files: { head: ['Archivo', 'Para'], setup: 'Instalador. Incluye Node.js, sin permisos de administrador', portable: 'Sin instalación: ejecuta `SixM.exe`', server: `Solo el servidor, para alojarlo. Requiere ${NODE}` },
     unsigned: 'El programa no está firmado: Windows SmartScreen puede mostrar un aviso. `SHA256SUMS.txt` contiene las sumas de los archivos.',
-    source: `Desde el código: \`SixM.bat\` en Windows, o \`npm install\` y luego \`npm run app\`. Requiere ${NODE} 20.15 o posterior.`,
+    source: `Desde el código: \`SixM.bat\` en Windows, o \`npm install\` y luego \`npm run app\`. Requiere ${NODE} 20.15 o posterior. Interfaz nativa: \`cargo build --release\` en \`desktop/\` (si no, se abre la interfaz web).`,
     features: 'Funciones',
     feature: [
       ['Jugar', 'Elige un juego y un servidor y pulsa Jugar. Favoritos, chat, jugadores, radar. El modo demo no necesita juego.'],
@@ -106,7 +106,7 @@ export const LANGUAGES = {
     download: 'Herunterladen', downloadCta: 'Für Windows herunterladen',
     files: { head: ['Datei', 'Für'], setup: 'Installationsprogramm. Node.js enthalten, ohne Administratorrechte', portable: 'Ohne Installation: `SixM.exe` starten', server: `Nur der Server, zum Hosten. Benötigt ${NODE}` },
     unsigned: 'Das Programm ist nicht signiert, Windows SmartScreen kann daher warnen. `SHA256SUMS.txt` enthält die Prüfsummen.',
-    source: `Aus dem Quellcode: \`SixM.bat\` unter Windows, sonst \`npm install\` und dann \`npm run app\`. Benötigt ${NODE} 20.15 oder neuer.`,
+    source: `Aus dem Quellcode: \`SixM.bat\` unter Windows, sonst \`npm install\` und dann \`npm run app\`. Benötigt ${NODE} 20.15 oder neuer. Native Oberfläche: \`cargo build --release\` in \`desktop/\` (sonst öffnet sich die Weboberfläche).`,
     features: 'Funktionen',
     feature: [
       ['Spielen', 'Spiel und Server wählen, dann starten. Favoriten, Chat, Spieler, Radar. Der Demomodus braucht kein Spiel.'],
@@ -136,7 +136,7 @@ export const LANGUAGES = {
     download: 'Baixar', downloadCta: 'Baixar para Windows',
     files: { head: ['Arquivo', 'Para'], setup: 'Instalador. Inclui Node.js, sem permissão de administrador', portable: 'Sem instalação: execute `SixM.exe`', server: `Somente o servidor, para hospedagem. Requer ${NODE}` },
     unsigned: 'O programa não é assinado: o Windows SmartScreen pode exibir um aviso. `SHA256SUMS.txt` traz as somas de verificação.',
-    source: `A partir do código: \`SixM.bat\` no Windows, ou \`npm install\` e depois \`npm run app\`. Requer ${NODE} 20.15 ou mais recente.`,
+    source: `A partir do código: \`SixM.bat\` no Windows, ou \`npm install\` e depois \`npm run app\`. Requer ${NODE} 20.15 ou mais recente. Interface nativa: \`cargo build --release\` em \`desktop/\` (senão abre a interface web).`,
     features: 'Recursos',
     feature: [
       ['Jogar', 'Escolha um jogo e um servidor e clique em Jogar. Favoritos, chat, jogadores, radar. O modo demo não precisa de jogo.'],
@@ -166,7 +166,7 @@ export const LANGUAGES = {
     download: '下载', downloadCta: '下载 Windows 版',
     files: { head: ['文件', '用途'], setup: '安装程序。内含 Node.js，无需管理员权限', portable: '免安装：运行 `SixM.exe`', server: `仅服务器，用于托管。需要 ${NODE}` },
     unsigned: '程序未签名，Windows SmartScreen 可能会发出警告。`SHA256SUMS.txt` 列出了文件校验和。',
-    source: `从源码运行：Windows 上使用 \`SixM.bat\`，其他系统先 \`npm install\` 再 \`npm run app\`。需要 ${NODE} 20.15 或更高版本。`,
+    source: `从源码运行：Windows 上使用 \`SixM.bat\`，其他系统先 \`npm install\` 再 \`npm run app\`。需要 ${NODE} 20.15 或更高版本。原生界面：在 \`desktop/\` 中运行 \`cargo build --release\`（否则打开网页界面）。`,
     features: '功能',
     feature: [
       ['游玩', '选择游戏和服务器，然后开始。收藏、聊天、玩家列表、雷达。演示模式无需游戏。'],
@@ -196,7 +196,7 @@ export const LANGUAGES = {
     download: 'ダウンロード', downloadCta: 'Windows 版をダウンロード',
     files: { head: ['ファイル', '用途'], setup: 'インストーラー。Node.js 同梱、管理者権限は不要', portable: 'インストール不要：`SixM.exe` を実行', server: `サーバーのみ（ホスティング用）。${NODE} が必要` },
     unsigned: 'プログラムは署名されていないため、Windows SmartScreen が警告を表示することがあります。`SHA256SUMS.txt` にチェックサムがあります。',
-    source: `ソースから：Windows では \`SixM.bat\`、それ以外は \`npm install\` の後に \`npm run app\`。${NODE} 20.15 以降が必要です。`,
+    source: `ソースから：Windows では \`SixM.bat\`、それ以外は \`npm install\` の後に \`npm run app\`。${NODE} 20.15 以降が必要です。ネイティブ画面：\`desktop/\` で \`cargo build --release\`（なければ Web 画面が開きます）。`,
     features: '機能',
     feature: [
       ['プレイ', 'ゲームとサーバーを選んで開始。お気に入り、チャット、プレイヤー、レーダー。デモモードはゲーム不要です。'],
@@ -226,7 +226,7 @@ export const LANGUAGES = {
     download: 'Скачать', downloadCta: 'Скачать для Windows',
     files: { head: ['Файл', 'Назначение'], setup: 'Установщик. Node.js включён, права администратора не нужны', portable: 'Без установки: запустите `SixM.exe`', server: `Только сервер, для хостинга. Нужен ${NODE}` },
     unsigned: 'Программа не подписана, поэтому Windows SmartScreen может показать предупреждение. Контрольные суммы — в `SHA256SUMS.txt`.',
-    source: `Из исходников: \`SixM.bat\` в Windows, иначе \`npm install\`, затем \`npm run app\`. Нужен ${NODE} 20.15 или новее.`,
+    source: `Из исходников: \`SixM.bat\` в Windows, иначе \`npm install\`, затем \`npm run app\`. Нужен ${NODE} 20.15 или новее. Нативный интерфейс: \`cargo build --release\` в \`desktop/\` (иначе откроется веб-интерфейс).`,
     features: 'Возможности',
     feature: [
       ['Игра', 'Выберите игру и сервер и начинайте. Избранное, чат, игроки, радар. Демо-режим работает без игры.'],

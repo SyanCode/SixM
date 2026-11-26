@@ -1,9 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const run = (cmd, args) => new Promise((resolve) => {
-  const p = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const UI_EXE = process.platform === 'win32' ? 'sixm-ui.exe' : 'sixm-ui';
+
+const run = (cmd, args, env) => new Promise((resolve) => {
+  const p = spawn(cmd, args, { detached: true, stdio: 'ignore', ...(env && { env: { ...process.env, ...env } }) });
   p.once('error', () => resolve(false));
   p.once('spawn', () => { p.unref(); resolve(true); });
 });
@@ -14,8 +18,21 @@ export function openExternal(target) {
   return run(process.platform === 'darwin' ? 'open' : 'xdg-open', [target]);
 }
 
-/** Ouvre l'interface dans sa propre fenêtre (Edge ou Chrome), sinon dans le navigateur. */
+/**
+ * Interface native (desktop/, en Rust) : SIXM_UI_BIN, celle fournie avec l'installation, ou celle compilée
+ * avec `cargo build --release`. SIXM_WEB_UI garde l'interface web.
+ */
+export function nativeUi(env = process.env, dir = root) {
+  if (env.SIXM_WEB_UI) return null;
+  const files = [env.SIXM_UI_BIN, path.join(dir, 'desktop', UI_EXE), path.join(dir, 'desktop', 'target', 'release', UI_EXE)];
+  return files.find((f) => f && fs.existsSync(f)) ?? null;
+}
+
+/** Ouvre l'interface native, sinon une fenêtre d'Edge ou de Chrome, sinon le navigateur. */
 export async function openWindow(url) {
+  // L'adresse contient le jeton de session : passée par l'environnement, pas sur la ligne de commande.
+  const native = nativeUi();
+  if (native && await run(native, [], { SIXM_URL: url })) return true;
   if (process.platform === 'win32') {
     const roots = [process.env['ProgramFiles(x86)'], process.env.ProgramFiles, process.env.LOCALAPPDATA].filter(Boolean);
     for (const exe of ['Microsoft\\Edge\\Application\\msedge.exe', 'Google\\Chrome\\Application\\chrome.exe']) {

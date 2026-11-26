@@ -4,3 +4,4 @@ dist/
 packaging/.cache/
 integrations/victory/sixm-bridge/Cargo.lock
 integrations/victory/sixm-bridge/target/
+desktop/target/
