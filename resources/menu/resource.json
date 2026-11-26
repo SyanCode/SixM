@@ -1,0 +1,1 @@
+{ "name": "menu", "description": "Menu principal (touche M) : profil, emotes, et administration pour les admins", "server": ["server.js"] }

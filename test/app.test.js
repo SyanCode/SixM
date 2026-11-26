@@ -217,7 +217,7 @@ test('héberger : créer, démarrer, mods à chaud, console, réglages, arrêt',
   await until(async () => (await host()).status === 'running', 'démarrage');
 
   await post(`/api/hosts/import?id=${id}&file=accueil.zip`, mod('accueil'));
-  assert.deepEqual((await host()).mods.map((m) => [m.name, m.enabled]), [['accueil', false], ['hello', true]]);
+  assert.deepEqual((await host()).mods.map((m) => [m.name, m.enabled]), [['accueil', false], ['hello', true], ['menu', true]]);
   await post('/api/hosts/mod', { id, name: 'accueil', enabled: true });
   await until(async () => (await host()).log.some((l) => l.includes('démarrée: accueil')), 'mod démarré à chaud');
   await assert.rejects(post('/api/hosts/mod', { id, name: '../x', enabled: true }), /mod inconnu/);
@@ -308,3 +308,41 @@ test('zip lisible par Windows', { skip: process.platform !== 'win32' }, async ()
   assert.ok(fs.existsSync(path.join(dir, 'SixM-Server', 'start.bat')));
   fs.rmSync(dir, { recursive: true, maxRetries: 5 });
 });
+
+test('identité, liste blanche et menus depuis l\'application', async () => withApp(async ({ post, state, dataDir }) => {
+  const { settings } = await state();
+  assert.match(settings.uid, /^sixm:[0-9a-f]{20}$/);
+  assert.ok(!JSON.stringify(await state()).includes('privateKey'), 'clé privée jamais montrée');
+  assert.equal(new Settings(dataDir).public().uid, settings.uid, 'identité stable entre deux lancements');
+  if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(dataDir, 'settings.json')).mode & 0o077, 0, 'fichier privé');
+  assert.ok(!JSON.stringify(await post('/api/settings', { name: 'Ana' })).includes('privateKey'));
+
+  // Serveur hébergé, privé, à liste blanche : on se fait refuser, puis on s'accepte depuis l'application.
+  const port = await freePort();
+  const { id } = await post('/api/hosts', { name: 'Club', port, visibility: 'private', whitelist: true, tags: ['RP'] });
+  const host = async () => (await state()).hosts.find((x) => x.id === id);
+  assert.deepEqual([(await host()).visibility, (await host()).whitelist, (await host()).tags], ['private', true, ['RP']]);
+  await post('/api/hosts/start', { id });
+  await until(async () => (await host()).status === 'running', 'démarrage');
+  await post('/api/connect', { address: `localhost:${port}` });
+  await until(async () => (await state()).session.error?.includes('liste blanche'), 'refus');
+  await until(async () => (await host()).access.requests.length === 1, 'demande visible');
+  await post('/api/hosts/access', { id, action: 'approve', uid: settings.uid });
+  await post('/api/hosts/access', { id, action: 'admin', uid: settings.uid, name: 'Ana' });
+  assert.deepEqual((await host()).access.whitelist.map((e) => e.uid), [settings.uid]);
+  await assert.rejects(post('/api/hosts/access', { id, action: 'approve', uid: 'x' }), /identifiant invalide/);
+
+  await post('/api/connect', { address: `localhost:${port}` });
+  await until(async () => (await state()).session.status === 'connected', 'accepté');
+  await until(async () => (await host()).players.some((p) => p.uid === settings.uid && p.admin), 'joueurs vus par l\'hôte');
+  assert.equal((await state()).session.uid, settings.uid);
+  await post('/api/menu/open');
+  await until(async () => (await state()).session.menu?.id === 'sixm:main', 'menu principal');
+  assert.ok((await state()).session.menu.items.some((i) => i.id === 'admin'), 'admin : administration visible');
+  await post('/api/menu/select', { menu: 'sixm:main', item: 'profil' });
+  await until(async () => (await state()).session.menu?.id === 'profil', 'menu profil');
+  await post('/api/menu/close');
+  assert.equal((await state()).session.menu, null);
+  await post('/api/disconnect');
+  await post('/api/hosts/stop', { id });
+}));

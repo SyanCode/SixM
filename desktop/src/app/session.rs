@@ -41,6 +41,10 @@ impl SixmApp {
             });
 
         egui::CentralPanel::default().frame(egui::Frame::new().fill(BG).inner_margin(Margin { left: 28, right: 24, top: 22, bottom: 22 })).show(ui, |ui| {
+            // Menu des mods, en haut à gauche, par-dessus le chat.
+            let anchor = ui.max_rect().min + vec2(18.0, 118.0);
+            let ctx = ui.ctx().clone();
+            self.menu_ui(&ctx, anchor);
             // En-tête : serveur et bouton Quitter.
             theme::card().inner_margin(16).show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -57,6 +61,22 @@ impl SixmApp {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if theme::button_sized(ui, Kind::Danger, ic::SIGN_OUT, "Quitter", vec2(0.0, 40.0), true).clicked() {
                             self.post("/api/disconnect", json!({}));
+                        }
+                        let open = self.menu.is_some();
+                        let label = if open { "Fermer le menu" } else { "Menu" };
+                        if theme::button_sized(ui, if open { Kind::Normal } else { Kind::Primary }, ic::LIST, label, vec2(0.0, 40.0), true)
+                            .on_hover_text("Touche M")
+                            .clicked()
+                        {
+                            if open {
+                                self.menu = None;
+                                self.post("/api/menu/close", json!({}));
+                            } else {
+                                self.post("/api/menu/open", json!({}));
+                            }
+                        }
+                        if s.admin {
+                            theme::pill(ui, "Admin", ACCENT);
                         }
                     });
                 });

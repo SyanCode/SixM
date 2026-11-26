@@ -1,6 +1,7 @@
 //! Application : barre du haut, vues, dialogues et notifications.
 
 mod host;
+mod menu;
 mod play;
 mod session;
 mod settings;
@@ -28,6 +29,7 @@ pub enum View {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum HostTab {
+    Players,
     Console,
     Mods,
     Settings,
@@ -39,6 +41,8 @@ pub enum ListTab {
     All,
     Favorites,
     Recents,
+    Lan,
+    Public,
     Mine,
 }
 
@@ -72,6 +76,8 @@ pub enum Kindof {
     Mine,
     Favorite,
     Recent,
+    Lan,
+    Public,
     Typed,
 }
 
@@ -112,6 +118,11 @@ pub struct SixmApp {
     pub settings_tab: SettingsTab,
     pub host_form: Option<(String, host::HostForm)>,
     wanted: Vec<String>,
+    pub menu: Option<menu::MenuView>,
+    /// Serveurs des annuaires publics, et le moment où ils ont été lus.
+    pub listed: Vec<api::Listed>,
+    pub listed_at: Option<Instant>,
+    pub host_uid: String,
 }
 
 impl SixmApp {
@@ -160,7 +171,7 @@ impl SixmApp {
                 _ => View::Home,
             },
             host_id: std::env::var("SIXM_UI_VIEW").ok().and_then(|v| v.strip_prefix("host:").map(String::from)),
-            host_tab: HostTab::Console,
+            host_tab: HostTab::Players,
             list_tab: ListTab::All,
             search: String::new(),
             selected: None,
@@ -178,6 +189,10 @@ impl SixmApp {
             settings_tab: SettingsTab::General,
             host_form: None,
             wanted: Vec::new(),
+            menu: None,
+            listed: Vec::new(),
+            listed_at: None,
+            host_uid: String::new(),
         }
     }
 
@@ -265,6 +280,20 @@ impl SixmApp {
                 out.push(Entry { address: a.clone(), label: String::new(), kind: Kindof::Recent });
             }
         }
+        for d in &self.st.discovered {
+            // Ses propres serveurs s'annoncent aussi : ils sont déjà dans « Vos serveurs ».
+            let (ip, port) = d.address.rsplit_once(':').unwrap_or((&d.address, ""));
+            let mine = self.st.hosts.iter().any(|h| h.status == "running" && h.port.to_string() == port)
+                && (self.st.lan.as_deref() == Some(ip) || ip.starts_with("127."));
+            if !mine && seen.insert(d.address.clone()) {
+                out.push(Entry { address: d.address.clone(), label: d.name.clone(), kind: Kindof::Lan });
+            }
+        }
+        for l in &self.listed {
+            if seen.insert(l.address.clone()) {
+                out.push(Entry { address: l.address.clone(), label: l.name.clone(), kind: Kindof::Public });
+            }
+        }
         out
     }
 
@@ -307,6 +336,16 @@ impl SixmApp {
         } else {
             self.post("/api/connect", json!({ "address": address }));
         }
+    }
+
+    /// Relit les annuaires publics (onglet Publics).
+    pub fn fetch_directories(&mut self) {
+        self.listed_at = Some(Instant::now());
+        self.act(|api| {
+            let v = api.post("/api/directories", json!({}))?;
+            let list: Vec<api::Listed> = serde_json::from_value(v.get("servers").cloned().unwrap_or_default()).unwrap_or_default();
+            Ok(Some(Box::new(move |app: &mut SixmApp| app.listed = list) as Job))
+        });
     }
 
     pub fn can_solo(&self) -> bool {
@@ -378,6 +417,7 @@ impl SixmApp {
             }
             self.last_session = status;
         }
+        self.sync_menu();
         if self.view == View::Session && self.st.session.status != "connected" {
             self.view = View::Servers;
         }
@@ -392,7 +432,9 @@ impl SixmApp {
 
         // Fiches à rafraîchir : seulement sur les vues qui les affichent.
         let mut wanted: Vec<String> = if matches!(self.view, View::Home | View::Servers) && self.session_idle() {
-            self.entries().into_iter().map(|e| e.address).collect()
+            // Les serveurs des annuaires ne sont interrogés que sur leur onglet.
+            let public = self.view == View::Servers && self.list_tab == ListTab::Public;
+            self.entries().into_iter().filter(|e| public || e.kind != Kindof::Public).take(80).map(|e| e.address).collect()
         } else {
             Vec::new()
         };
@@ -716,6 +758,9 @@ impl eframe::App for SixmApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         self.pump();
         let ctx = ui.ctx().clone();
+        if self.have_state && self.offline.is_none() {
+            self.menu_keys(&ctx);
+        }
 
         egui::Panel::top("top").exact_size(64.0).frame(egui::Frame::NONE).show(ui, |ui| {
             if self.have_state {

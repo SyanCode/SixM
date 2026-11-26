@@ -1,8 +1,9 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createIdentity, isIdentity, playerUid } from '../server/identity.js';
 
-const DEFAULTS = { name: 'Joueur', autoUpdate: true, target: 'demo', victory: '', games: [], favorites: [], recents: [] };
+const DEFAULTS = { name: 'Joueur', autoUpdate: true, target: 'demo', victory: '', games: [], favorites: [], recents: [], directories: [] };
 const clean = (v, max) => String(v).replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim().slice(0, max);
 
 function normalize(raw) {
@@ -24,10 +25,18 @@ function normalize(raw) {
     favorites: (Array.isArray(s.favorites) ? s.favorites : []).slice(0, 50)
       .map((f) => ({ address: address(f?.address), label: clean(f?.label ?? '', 64) })).filter((f) => f.address),
     recents: (Array.isArray(s.recents) ? s.recents : []).map(address).filter(Boolean).slice(0, 8),
+    // Annuaires de serveurs publics consultés par l'onglet « Publics ».
+    directories: (Array.isArray(s.directories) ? s.directories : []).map((u) => clean(u ?? '', 255))
+      .filter((u) => /^https?:\/\/[^\s/]+\/?$/.test(u)).slice(0, 4),
+    // Clé du joueur : créée une fois, jamais envoyée à l'interface ni aux serveurs.
+    identity: isIdentity(s.identity) ? { publicKey: s.identity.publicKey, privateKey: s.identity.privateKey } : createIdentity(),
   };
 }
 
-/** Réglages du joueur dans `settings.json`. Aucun mot de passe n'y est gardé. */
+/**
+ * Réglages du joueur dans `settings.json`. Aucun mot de passe de serveur n'y est gardé ; il contient la clé
+ * privée du joueur, d'où un fichier lisible par lui seul.
+ */
 export class Settings {
   constructor(dir) {
     this.file = path.join(dir, 'settings.json');
@@ -35,15 +44,25 @@ export class Settings {
     // Réglages illisibles : on repart des valeurs par défaut plutôt que de bloquer l'application.
     try { raw = JSON.parse(fs.readFileSync(this.file, 'utf8')); } catch { /* premier lancement */ }
     this.value = normalize(raw && typeof raw === 'object' ? raw : {});
+    // Nouvelle identité : enregistrée tout de suite pour rester la même au prochain lancement.
+    if (!isIdentity(raw?.identity)) {
+      try { this.update({}); } catch (e) { console.error('[réglages]', e.message); }
+    }
   }
 
   update(patch) {
     this.value = normalize({ ...this.value, ...patch });
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     const tmp = `${this.file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(this.value, null, 2) + '\n');
+    fs.writeFileSync(tmp, JSON.stringify(this.value, null, 2) + '\n', { mode: 0o600 });
     fs.renameSync(tmp, this.file);
     return this.value;
+  }
+
+  /** Réglages montrés à l'interface : l'identité réduite à son identifiant public. */
+  public() {
+    const { identity, ...rest } = this.value;
+    return { ...rest, uid: playerUid(identity.publicKey) };
   }
 
   remember(address) {

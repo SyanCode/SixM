@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 
-/** Bannissements par IP. Fichier : [{ ip, name, reason, at }], `at` en ISO 8601. */
+/** Bannissements par IP et par identifiant de joueur. Fichier : [{ ip, uid?, name, reason, at }], `at` en ISO 8601. */
 export class BanList {
   constructor(file = null) {
     this.file = file;
@@ -12,11 +12,14 @@ export class BanList {
     for (const b of list) if (typeof b?.ip === 'string') this.bans.set(b.ip, b);
   }
 
-  get(ip) { return this.bans.get(ip); }
+  /** Bannissement qui touche cette IP ou cet identifiant. */
+  get(ip, uid = null) {
+    return this.bans.get(ip) ?? (uid ? this.list().find((b) => b.uid === uid) : undefined);
+  }
   list() { return [...this.bans.values()]; }
 
-  add(ip, name, reason) {
-    this.bans.set(ip, { ip, name, reason, at: new Date().toISOString() });
+  add(ip, name, reason, uid = null) {
+    this.bans.set(ip, { ip, ...(uid && { uid }), name, reason, at: new Date().toISOString() });
     this.#save();
   }
 

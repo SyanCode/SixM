@@ -23,7 +23,7 @@ export class Session {
     this.adapter = null;
   }
 
-  connect({ address, name, password, adapter: adapterName }) {
+  connect({ address, name, password, identity, adapter: adapterName }) {
     if (this.status !== 'idle') throw new Error('déjà connecté à un serveur');
     const url = serverUrl(address);
     const adapter = createAdapter(adapterName, this.adapterOptions);
@@ -32,7 +32,7 @@ export class Session {
     Object.assign(this, { address, adapterName, adapter });
     adapter.log = this.#recorder();
     const client = this.client = new SixMClient({
-      url, name, password, adapter,
+      url, name, password, identity, adapter,
       onDisconnect: (reason) => {
         if (this.client !== client) return;
         adapter.shutdown();
@@ -62,10 +62,25 @@ export class Session {
     if (clean) this.client.emitServer('chat', clean);
   }
 
+  openMenu() { this.#live().openMenu(); }
+  closeMenu() { this.#live().closeMenu(); }
+  selectMenu(menu, item, value) {
+    const v = ['boolean', 'number'].includes(typeof value) ? value : null;
+    this.#live().selectMenu(String(menu).slice(0, 48), String(item).slice(0, 48), v);
+  }
+
+  #live() {
+    if (this.status !== 'connected') throw new Error('pas connecté');
+    return this.client;
+  }
+
   state() {
     const { client } = this;
     const connected = this.status === 'connected';
     return {
+      uid: connected ? client.uid : null,
+      admin: connected ? !!client.roster.find((p) => p.id === client.id)?.admin : false,
+      menu: connected ? client.menu : null, menuSeq: connected ? client.menuSeq : 0,
       status: this.status, attempt: this.attempt, address: this.address, adapter: this.adapterName, error: this.error, log: this.log,
       serverName: connected ? client.serverName : null,
       id: connected ? client.id : null,

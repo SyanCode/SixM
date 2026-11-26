@@ -7,6 +7,7 @@ import { queryServer } from '../client/address.js';
 import { linkSupported, pickPath, startLink } from '../client/link.js';
 import { isExe, VictoryBuilder } from './builder.js';
 import { Hosts, lanAddress } from './hosts.js';
+import { Discovery, fetchDirectories } from './discovery.js';
 import { findVictory, Launcher, resolveGame } from './launcher.js';
 import { Session } from './session.js';
 import { Settings } from './settings.js';
@@ -74,6 +75,8 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
   let lastSeen = Date.now();
   let origin;
 
+  const discovery = new Discovery();
+  discovery.start();
   const selectedGame = () => settings.value.games.find((g) => g.id === settings.value.target);
 
   const ensureLink = async () => {
@@ -94,7 +97,7 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
     if (session.status !== 'idle') throw new Error('déjà connecté à un serveur');
     if (game && !launcher.pid) { launcher.check(settings.value.victory, game); await launcher.prepare(); }
     if (victory) await ensureLink();
-    session.connect({ address, password, name: settings.value.name, adapter: victory ? 'victory' : 'mock' })
+    session.connect({ address, password, name: settings.value.name, identity: settings.value.identity, adapter: victory ? 'victory' : 'mock' })
       .then(async (ok) => {
         if (!ok) return;
         settings.remember(address);
@@ -111,12 +114,20 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
   }, 3000);
 
   const routes = {
-    'GET /api/state': async () => ({ settings: settings.value, session: session.state(), hosts: hosts.list(), lan: await lanAddress(), game: launcher.state(), linkSupported, victory: { ...victory.state(), valid: victoryValid() }, update: updater.state() }),
-    'POST /api/settings': ({ name, target, victory, games, autoUpdate: auto }) => settings.update({
-      ...(auto !== undefined && { autoUpdate: auto === true }),
-      ...(name !== undefined && { name }), ...(target !== undefined && { target }),
-      ...(victory !== undefined && { victory }), ...(games !== undefined && { games }),
-    }),
+    'GET /api/state': async () => ({ settings: settings.public(), discovered: discovery.list(), session: session.state(), hosts: hosts.list(), lan: await lanAddress(), game: launcher.state(), linkSupported, victory: { ...victory.state(), valid: victoryValid() }, update: updater.state() }),
+    'POST /api/settings': ({ name, target, victory, games, directories, autoUpdate: auto }) => {
+      settings.update({
+        ...(auto !== undefined && { autoUpdate: auto === true }),
+        ...(name !== undefined && { name }), ...(target !== undefined && { target }),
+        ...(victory !== undefined && { victory }), ...(games !== undefined && { games }),
+        ...(directories !== undefined && { directories }),
+      });
+      return settings.public();
+    },
+    'POST /api/directories': async () => ({ servers: await fetchDirectories(settings.value.directories) }),
+    'POST /api/menu/open': () => session.openMenu(),
+    'POST /api/menu/close': () => session.closeMenu(),
+    'POST /api/menu/select': ({ menu, item, value }) => session.selectMenu(menu, item, value),
     'POST /api/pick': async ({ title, folder }) => {
       if (!linkSupported) throw new Error('écrivez le chemin à la main');
       return { file: await pickPath(String(title ?? '').slice(0, 80) || 'Choisir', { folder: folder === true, dir: linkDir }) };
@@ -143,7 +154,7 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
     'POST /api/victory/tool': ({ id }) => { victory.installTool(id); },
     'POST /api/victory/cancel': () => victory.cancel(),
     'POST /api/victory/storage': () => openExternal('ms-settings:storagesense'),
-    'POST /api/favorite': ({ address, label }) => settings.toggleFavorite(String(address), label),
+    'POST /api/favorite': ({ address, label }) => { settings.toggleFavorite(String(address), label); return settings.public(); },
     'POST /api/query': async ({ address }) => {
       try { return { online: true, ...await queryServer(address) }; } catch { return { online: false }; }
     },
@@ -164,6 +175,8 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
     'POST /api/hosts/stop': ({ id }) => hosts.stop(id),
     'POST /api/hosts/command': ({ id, line }) => hosts.command(id, line),
     'POST /api/hosts/mod': ({ id, name, enabled }) => hosts.setMod(id, name, enabled === true),
+    'POST /api/hosts/access': ({ id, action, uid, name }) => hosts.access(id, String(action), String(uid ?? ''), String(name ?? '')),
+    'POST /api/hosts/player': ({ id, player, action }) => hosts.playerAction(id, Number(player), String(action)),
     'POST /api/hosts/open': ({ id }) => openExternal(path.join(hosts.path(id), 'resources')),
     'POST /api/quit': () => { setTimeout(onQuit, 100); },
   };
@@ -232,6 +245,7 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
     url: `${origin}/#${token}`,
     close: async () => {
       clearInterval(attachTimer);
+      discovery.stop();
       clearInterval(updateTimer);
       await victory.close();
       await session.disconnect();

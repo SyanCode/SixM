@@ -93,7 +93,7 @@ export function packServer({ config = {}, resourcesDir = path.join(root, 'resour
     { name: `${top}/sixm/client/address.js`, data: fs.readFileSync(path.join(root, 'client', 'address.js')) },
   ];
   walk(path.join(root, 'server'), `${top}/sixm/server`, files);
-  walk(path.join(root, 'resources', 'hello'), `${top}/sixm/resources/hello`, files);
+  for (const r of ['hello', 'menu']) walk(path.join(root, 'resources', r), `${top}/sixm/resources/${r}`, files);
   walk(ws, `${top}/sixm/node_modules/ws`, files, (n) => n === 'node_modules');
   if (fs.existsSync(resourcesDir)) walk(resourcesDir, `${top}/resources`, files, (n) => n === '.git' || n === 'node_modules');
   if (files.reduce((n, f) => n + f.data.length, 0) > MAX_BYTES) throw new Error('serveur trop volumineux pour être empaqueté (200 Mo)');

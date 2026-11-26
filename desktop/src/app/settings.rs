@@ -13,6 +13,7 @@ pub struct SettingsForm {
     pub auto_update: bool,
     pub victory: String,
     pub games: Vec<Game>,
+    pub directories: String,
 }
 
 fn unquote(p: &str) -> String {
@@ -50,7 +51,13 @@ impl SixmApp {
     pub fn settings(&mut self, ui: &mut Ui) {
         if self.settings_form.is_none() {
             let s = &self.st.settings;
-            self.settings_form = Some(SettingsForm { name: s.name.clone(), auto_update: s.auto_update, victory: s.victory.clone(), games: s.games.clone() });
+            self.settings_form = Some(SettingsForm {
+                name: s.name.clone(),
+                auto_update: s.auto_update,
+                victory: s.victory.clone(),
+                games: s.games.clone(),
+                directories: s.directories.join("\n"),
+            });
         }
         page(ui, "settings", 900.0, |ui| {
             ui.label(theme::title("Réglages", 28.0));
@@ -85,6 +92,24 @@ impl SixmApp {
             if form.name.chars().count() > 24 {
                 form.name = form.name.chars().take(24).collect();
             }
+        });
+        let uid = self.st.settings.uid.clone();
+        let mut copy = false;
+        section(ui, "Votre identité", "Chaque serveur vous reconnaît à cet identifiant, même si vous changez de pseudo. Donnez-le à l'hôte d'un serveur à liste blanche pour qu'il vous accepte. La clé qui le prouve reste sur ce PC.", |ui| {
+            ui.horizontal(|ui| {
+                egui::Frame::new().fill(egui::Color32::from_rgb(13, 14, 18)).stroke(egui::Stroke::new(1.0, LINE)).corner_radius(6).inner_margin(egui::Margin::symmetric(12, 9)).show(ui, |ui| {
+                    ui.label(RichText::new(format!("{}  {uid}", ic::IDENTIFICATION_CARD)).font(theme::mono(14.0)).color(theme::TEXT));
+                });
+                copy = theme::button(ui, Kind::Normal, ic::COPY, "Copier").clicked();
+            });
+        });
+        if copy {
+            ui.ctx().copy_text(uid);
+            self.toast("Identifiant copié", false);
+        }
+        let form = self.settings_form.as_mut().unwrap();
+        section(ui, "Annuaires de serveurs publics", "Un annuaire liste les serveurs publics d'Internet : ils apparaissent dans l'onglet Publics. Une adresse par ligne, jusqu'à 4. Pour en héberger un : sixm directory.", |ui| {
+            ui.add(egui::TextEdit::multiline(&mut form.directories).hint_text("http://annuaire.exemple.net:30100").desired_rows(2).desired_width(f32::INFINITY));
         });
         let u = self.st.update.clone();
         let mut check = false;
@@ -191,7 +216,11 @@ impl SixmApp {
     fn save_bar(&mut self, ui: &mut Ui) {
         let original = &self.st.settings;
         let form = self.settings_form.clone().unwrap();
-        let dirty = form.name != original.name || form.auto_update != original.auto_update || form.victory != original.victory || form.games != original.games;
+        let dirty = form.name != original.name
+            || form.auto_update != original.auto_update
+            || form.victory != original.victory
+            || form.games != original.games
+            || form.directories != original.directories.join("\n");
         ui.horizontal(|ui| {
             if theme::button_sized(ui, Kind::Primary, ic::FLOPPY_DISK, "Enregistrer", vec2(150.0, 40.0), dirty).clicked() {
                 self.save_settings(form.clone());
@@ -213,7 +242,8 @@ impl SixmApp {
     fn save_settings(&self, form: SettingsForm) {
         let known: Vec<String> = self.st.settings.games.iter().map(|g| g.id.clone()).collect();
         let games: Vec<Game> = form.games.iter().map(|g| Game { path: unquote(&g.path), ..g.clone() }).collect();
-        let body = json!({ "name": form.name, "autoUpdate": form.auto_update, "victory": unquote(&form.victory), "games": games });
+        let directories: Vec<String> = form.directories.lines().map(|l| l.trim().trim_end_matches('/').to_string()).filter(|l| !l.is_empty()).take(4).collect();
+        let body = json!({ "name": form.name, "autoUpdate": form.auto_update, "victory": unquote(&form.victory), "games": games, "directories": directories });
         self.act(move |api| {
             let saved = api.post("/api/settings", body)?;
             // Un jeu tout juste ajouté devient le jeu choisi.
@@ -230,6 +260,7 @@ impl SixmApp {
             }
             Ok(Some(Box::new(move |app: &mut SixmApp| {
                 app.settings_form = None;
+                app.listed_at = None; // annuaires peut-être changés
                 app.toast("Réglages enregistrés", false);
                 for p in problems {
                     app.toast(&p, true);

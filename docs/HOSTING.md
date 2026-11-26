@@ -15,6 +15,7 @@ Un mod est un dossier avec un `resource.json` :
 - À la main : copiez le dossier dans `resources/`. `"autostart": ["*"]` démarre tous les mods présents.
 
 Les joueurs reçoivent la partie client à la connexion : un joueur déjà connecté doit revenir.
+Menus en jeu : voir [MENUS.md](MENUS.md). Le mod `menu`, fourni avec chaque nouveau serveur, en donne un exemple complet.
 
 ## En ligne de commande
 ```bash
@@ -39,8 +40,27 @@ SixM : si vous déplacez SixM, corrigez ce chemin.
 | `trustProxy` | `false` | lire `X-Forwarded-For` ; uniquement derrière un reverse proxy |
 | `resourcesDir`, `autostart` | `"resources"`, `[]` | ressources |
 | `bansFile` | `"bans.json"` | bannissements |
+| `visibility` | `"public"` | `public` : annoncé sur le réseau local et aux annuaires ; `private` : seulement par l'adresse, liste des joueurs cachée |
+| `whitelist` | `false` | `true` : seuls les joueurs acceptés entrent |
+| `accessFile` | `"access.json"` | liste blanche, demandes d'accès, administrateurs |
+| `tags`, `motd` | `[]`, `""` | étiquettes (8 au plus) ; message d'accueil |
+| `directories` | `[]` | annuaires où s'inscrire, ex. `["http://annuaire.exemple.net:30100"]` |
 
 `SIXM_PORT` et `SIXM_PASSWORD` priment sur le fichier.
+
+## Public ou privé, liste blanche
+- **Public** : le serveur se signale sur le réseau local (onglet *Réseau local* de SixM) et s'inscrit aux annuaires de
+  `directories` (onglet *Publics*). **Privé** : on le rejoint seulement avec son adresse.
+- **Liste blanche** : chaque joueur a un identifiant (`sixm:…`, Réglages → Votre identité) prouvé par une clé gardée
+  sur son PC ; changer de pseudo ne suffit pas pour entrer. Un joueur refusé laisse une demande : Héberger → votre
+  serveur → Joueurs → Accepter. Ou en console : `whitelist`, `whitelist add sixm:…`.
+- **Admins** : Joueurs → Nommer admin, ou `admin <id>` en console. Ils passent la liste blanche et voient le menu
+  Administration en jeu (touche M). Un mot de passe et une liste blanche peuvent se cumuler.
+
+## Annuaire de serveurs publics
+`node bin/sixm.js directory 30100` sur une machine joignable. Les serveurs y ajoutent son adresse dans `directories`,
+les joueurs dans Réglages → Annuaires. L'annuaire vérifie chaque serveur en lisant sa fiche depuis Internet : le port du
+serveur doit être ouvert.
 
 ## Ouvrir le serveur aux autres
 1. Pare-feu Windows, en PowerShell administrateur :
@@ -56,8 +76,9 @@ node bin/sixm.js connect 203.0.113.7:30120 Pseudo
 Mot de passe : variable `SIXM_PASSWORD`.
 
 ## Administrer
-Console : `players`, `kick <id>`, `ban <id>`, `bans`, `unban <ip>`, `say <message>`, `resources`,
-`start|stop|restart <ressource>`, `info`, `quit`. Les bannissements (par IP) sont gardés dans `bans.json`.
+Console : `players`, `kick <id>`, `ban <id>`, `bans`, `unban <ip|identifiant>`, `say <message>`, `whitelist`,
+`whitelist add|remove <identifiant>`, `admin <id> [off]`, `access reload`, `resources`, `start|stop|restart <ressource>`,
+`info`, `quit`. Les bannissements (par IP et par identifiant) sont gardés dans `bans.json`.
 
 ## Sécurité
 - `ws://` n'est pas chiffré, mot de passe compris. Sur Internet, placez un reverse proxy TLS devant

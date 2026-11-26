@@ -121,13 +121,22 @@ impl SixmApp {
         ui.advance_cursor_after_rect(rect);
     }
 
-    fn session_error(&mut self, ui: &mut Ui) {
+    pub fn session_error(&mut self, ui: &mut Ui) {
         let Some(e) = self.st.session.error.clone() else { return };
         egui::Frame::new().fill(RED.gamma_multiply(0.12)).corner_radius(8).inner_margin(14).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.label(RichText::new(ic::WARNING_CIRCLE).size(18.0).color(RED));
-                ui.label(RichText::new(theme::cap(&e)).color(Color32::from_rgb(255, 170, 164)));
+                ui.add(egui::Label::new(RichText::new(theme::cap(&e)).color(Color32::from_rgb(255, 170, 164))).wrap());
+                // Refus par liste blanche : l'hôte a besoin de l'identifiant.
+                if e.contains("liste blanche") {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if theme::button(ui, Kind::Normal, ic::COPY, "Copier mon identifiant").clicked() {
+                            ui.ctx().copy_text(self.st.settings.uid.clone());
+                            self.toast("Identifiant copié : envoyez-le à l'hôte du serveur", false);
+                        }
+                    });
+                }
             });
         });
         ui.add_space(14.0);
@@ -257,6 +266,8 @@ impl SixmApp {
                 ListTab::All => true,
                 ListTab::Favorites => self.is_favorite(&e.address),
                 ListTab::Recents => self.st.settings.recents.contains(&e.address),
+                ListTab::Lan => e.kind != Kindof::Mine && self.st.discovered.iter().any(|d| d.address == e.address),
+                ListTab::Public => self.listed.iter().any(|l| l.address == e.address),
                 ListTab::Mine => e.kind == Kindof::Mine,
             })
             .filter(|e| q.is_empty() || e.address.to_lowercase().contains(&q) || self.display_name(&e.address, &e.label).to_lowercase().contains(&q))
@@ -312,17 +323,26 @@ impl SixmApp {
                     (ListTab::All, "Tous", all.len()),
                     (ListTab::Favorites, "Favoris", self.st.settings.favorites.len()),
                     (ListTab::Recents, "Historique", self.st.settings.recents.len()),
+                    (ListTab::Lan, "Réseau local", all.iter().filter(|e| e.kind != Kindof::Mine && self.st.discovered.iter().any(|d| d.address == e.address)).count()),
+                    (ListTab::Public, "Publics", self.listed.len()),
                     (ListTab::Mine, "Vos serveurs", all.iter().filter(|e| e.kind == Kindof::Mine).count()),
                 ];
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(4.0, 6.0);
                     for (tab, label, n) in counts {
                         if segment(ui, label, n, self.list_tab == tab).clicked() {
                             self.list_tab = tab;
+                            if tab == ListTab::Public {
+                                self.fetch_directories();
+                            }
                         }
                     }
                 });
+                if self.list_tab == ListTab::Public && self.listed_at.is_none_or(|t| t.elapsed().as_secs() > 60) && !self.st.settings.directories.is_empty() {
+                    self.fetch_directories();
+                }
                 ui.add_space(12.0);
+                self.session_error(ui);
 
                 // En-tête du tableau.
                 let w = ui.available_width();
@@ -334,6 +354,29 @@ impl SixmApp {
                 }
                 p.line_segment([head.left_bottom(), head.right_bottom()], Stroke::new(1.0, LINE));
 
+                if rows.is_empty() && self.list_tab == ListTab::Public && self.st.settings.directories.is_empty() {
+                    ui.add_space(50.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(RichText::new(ic::GLOBE).size(48.0).color(DIM));
+                        ui.label(theme::title("Aucun annuaire", 20.0));
+                        ui.label(theme::muted("Un annuaire liste les serveurs publics. Ajoutez son adresse dans les réglages."));
+                        ui.add_space(10.0);
+                        if theme::button(ui, Kind::Primary, ic::GEAR_SIX, "Ajouter un annuaire").clicked() {
+                            self.view = View::Settings;
+                            self.settings_tab = super::SettingsTab::General;
+                        }
+                    });
+                    return;
+                }
+                if rows.is_empty() && self.list_tab == ListTab::Lan {
+                    ui.add_space(50.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(RichText::new(ic::WIFI_HIGH).size(48.0).color(DIM));
+                        ui.label(theme::title("Aucun serveur sur votre réseau", 20.0));
+                        ui.label(theme::muted("Les serveurs publics de votre réseau local apparaissent ici tout seuls."));
+                    });
+                    return;
+                }
                 if rows.is_empty() {
                     ui.add_space(50.0);
                     ui.vertical_centered(|ui| {
@@ -402,6 +445,22 @@ impl SixmApp {
         if info.as_ref().is_some_and(|i| i.password) {
             p.text(pos2(x, cy + 9.0), Align2::LEFT_CENTER, ic::LOCK_SIMPLE, theme::f(13.0), MUTED);
             x += 18.0;
+        }
+        if info.as_ref().is_some_and(|i| i.whitelist) {
+            p.text(pos2(x, cy + 9.0), Align2::LEFT_CENTER, ic::SHIELD_CHECK, theme::f(13.0), YELLOW);
+            x += 18.0;
+        }
+        let badge = match e.kind {
+            Kindof::Lan => Some(("LAN", theme::GREEN)),
+            Kindof::Public => Some(("PUBLIC", theme::ACCENT)),
+            _ => None,
+        };
+        if let Some((text, color)) = badge {
+            let g = p.layout_no_wrap(text.into(), theme::fs(10.0), color);
+            let r = Rect::from_min_size(pos2(x, cy + 4.0), g.size() + vec2(10.0, 4.0));
+            p.rect_filled(r, 3, color.gamma_multiply(0.15));
+            p.galley(r.min + vec2(5.0, 2.0), g, color);
+            x = r.right() + 8.0;
         }
         p.with_clip_rect(clip).text(pos2(x, cy + 9.0), Align2::LEFT_CENTER, sub, theme::f(12.5), MUTED);
 
@@ -482,7 +541,21 @@ impl SixmApp {
                         if info.as_ref().is_some_and(|i| i.password) {
                             theme::pill(ui, "Mot de passe", YELLOW);
                         }
+                        if info.as_ref().is_some_and(|i| i.whitelist) {
+                            theme::pill(ui, "Liste blanche", YELLOW);
+                        }
+                        if info.as_ref().is_some_and(|i| i.visibility == "private") {
+                            theme::pill(ui, "Privé", MUTED);
+                        }
                     });
+                    if let Some(i) = info.as_ref().filter(|i| !i.tags.is_empty()) {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                            for t in &i.tags {
+                                theme::tag(ui, &format!("#{t}"));
+                            }
+                        });
+                    }
                     ui.add_space(14.0);
                     if let Some(i) = info.as_ref().filter(|i| i.online) {
                         ui.horizontal(|ui| {

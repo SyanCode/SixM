@@ -4,7 +4,11 @@ const HELP = `commandes :
   players                  joueurs connectés
   kick <id> [raison]       expulser
   ban <id> [raison]        bannir l'IP du joueur
-  bans | unban <ip>        lister / lever les bannissements
+  bans | unban <ip|id>     lister / lever les bannissements
+  whitelist                liste blanche et demandes
+  whitelist add|remove <id> accepter / retirer un joueur (identifiant sixm:…)
+  admin <id joueur> [off]  donner ou retirer les droits d'admin
+  access reload            relire access.json
   say <message>            message à tous
   resources                ressources disponibles et démarrées
   start|stop|restart <res> gérer une ressource
@@ -32,7 +36,7 @@ export function runCommand(srv, line, out = console.log) {
       for (const r of srv.resources.list()) out(`${srv.resources.running.has(r) ? '●' : '○'} ${r}`);
       return;
     case 'players':
-      for (const p of srv.world.players.values()) out(`#${p.id} ${p.name} (${p.ip})`);
+      for (const p of srv.world.players.values()) out(`#${p.id} ${p.name} (${p.ip}) ${p.uid ?? 'sans identité'}${srv.access.isAdmin(p.uid) ? ' admin' : ''}`);
       return out(`${srv.world.players.size}/${srv.config.maxPlayers}`);
     case 'kick': return srv.net.kick(player().id, reason);
     case 'ban': {
@@ -40,11 +44,34 @@ export function runCommand(srv, line, out = console.log) {
       srv.net.ban(Number(arg), reason);
       return out(`banni : ${name} (${ip})`);
     }
-    case 'unban':
-      if (!srv.bans.remove(arg)) throw new Error(`IP non bannie : ${arg ?? ''}`);
+    case 'unban': {
+      const ban = srv.bans.list().find((b) => b.ip === arg || b.uid === arg);
+      if (!ban || !srv.bans.remove(ban.ip)) throw new Error(`non banni : ${arg ?? ''}`);
       return out(`débanni : ${arg}`);
+    }
+    case 'whitelist': {
+      const uid = rest[0];
+      if (arg === 'add') { srv.access.add(uid); return out(`accepté : ${uid}`); }
+      if (arg === 'remove') { srv.access.remove(uid); return out(`retiré : ${uid}`); }
+      out(`liste blanche ${srv.config.whitelist ? 'active' : 'inactive'}`);
+      for (const e of srv.access.data.whitelist) out(`✓ ${e.uid} ${e.name}`);
+      for (const e of srv.access.data.requests) out(`? ${e.uid} ${e.name} (demande)`);
+      return;
+    }
+    case 'admin': {
+      const p = player();
+      if (!p.uid) throw new Error('joueur sans identité');
+      const on = rest[0] !== 'off';
+      srv.access.setAdmin(p.uid, p.name, on);
+      srv.net.sendRoster();
+      return out(`${p.name} ${on ? 'est admin' : 'n\'est plus admin'}`);
+    }
+    case 'access':
+      if (arg !== 'reload') throw new Error('access reload');
+      srv.access.reload();
+      return srv.net.sendRoster();
     case 'bans':
-      for (const b of srv.bans.list()) out(`${b.ip} ${b.name} – ${b.reason} (${b.at})`);
+      for (const b of srv.bans.list()) out(`${b.ip}${b.uid ? ` ${b.uid}` : ''} ${b.name} – ${b.reason} (${b.at})`);
       return;
     case 'say':
       return srv.net.broadcast({ t: 'event', name: 'chat', args: [`[Serveur] ${line.trim().slice(4).trim()}`] });

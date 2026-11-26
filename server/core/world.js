@@ -3,8 +3,8 @@ export class World {
   players = new Map(); // id -> { id, name, pos:{x,y,z,h}, socket }
   #nextId = 1;
 
-  addPlayer(name, socket, ip = '') {
-    const p = { id: this.#nextId++, name, pos: { x: 0, y: 0, z: 0, h: 0 }, located: false, socket, ip };
+  addPlayer(name, socket, ip = '', uid = null) {
+    const p = { id: this.#nextId++, name, uid, pos: { x: 0, y: 0, z: 0, h: 0 }, located: false, socket, ip };
     this.players.set(p.id, p);
     return p;
   }
@@ -27,6 +27,6 @@ export class World {
   }
 
   snapshot() {
-    return [...this.players.values()].map(({ id, name, pos }) => ({ id, name, pos }));
+    return [...this.players.values()].map(({ id, name, uid, pos }) => ({ id, name, uid, pos }));
   }
 }

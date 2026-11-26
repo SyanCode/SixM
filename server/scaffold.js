@@ -19,13 +19,16 @@ export function scaffoldServer(dir, overrides = {}) {
   };
   write('server.json', JSON.stringify({
     name: 'Mon serveur SixM', description: '', port: 30120, maxPlayers: 32, password: '',
-    tickRate: 20, syncRadius: 0, resourcesDir: 'resources', autostart: ['hello'], ...overrides,
+    tickRate: 20, syncRadius: 0, resourcesDir: 'resources', autostart: ['hello', 'menu'],
+    visibility: 'public', whitelist: false, tags: [], motd: '', ...overrides,
   }, null, 2) + '\n');
-  // server.json peut contenir le mot de passe, bans.json contient des adresses IP.
-  write('.gitignore', 'server.json\nbans.json\n');
+  // server.json peut contenir le mot de passe, bans.json des adresses IP, access.json des identifiants.
+  write('.gitignore', 'server.json\nbans.json\naccess.json\n');
   write('start.bat', `@echo off\r\nchcp 65001 >nul\r\n${NODE} "${CLI.replaceAll('%', '%%')}" start "%~dp0."\r\npause\r\n`);
   write('start.sh', `#!/bin/sh\nexec node '${CLI.replaceAll("'", "'\\''")}' start "$(dirname "$0")"\n`, { mode: 0o755 });
-  const hello = path.join(target, 'resources', 'hello');
-  if (!fs.existsSync(hello)) fs.cpSync(path.join(root, 'resources', 'hello'), hello, { recursive: true });
+  for (const name of ['hello', 'menu']) {
+    const dest = path.join(target, 'resources', name);
+    if (!fs.existsSync(dest)) fs.cpSync(path.join(root, 'resources', name), dest, { recursive: true });
+  }
   return target;
 }

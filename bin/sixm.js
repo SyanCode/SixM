@@ -14,6 +14,7 @@ const HELP = `usage :
   sixm start [dossier]                       héberger le serveur de ce dossier
   sixm pack [fichier.zip]                    créer le serveur téléchargeable
   sixm info <hôte[:port]>                    interroger un serveur
+  sixm directory [port]                      héberger un annuaire de serveurs publics
   sixm connect <hôte[:port]> [pseudo] [victory|mock]
                                              rejoindre (mot de passe : SIXM_PASSWORD)`;
 
@@ -38,6 +39,11 @@ async function main([cmd = hasApp ? 'app' : 'help', ...args]) {
       const file = path.resolve(args[0] ?? 'SixM-Server.zip');
       fs.writeFileSync(file, packServer(), { flag: 'wx' });
       return console.log(`[sixm] ${file}`);
+    }
+    case 'directory': {
+      const { startDirectory } = await import('../server/directory.js');
+      const d = await startDirectory({ port: Number(args[0] ?? 30100), trustProxy: process.env.SIXM_TRUST_PROXY === '1' });
+      return console.log(`[sixm] annuaire sur http://localhost:${d.port}/servers.json`);
     }
     case 'info':
       if (!args[0]) throw new Error('adresse attendue : sixm info <hôte[:port]>');

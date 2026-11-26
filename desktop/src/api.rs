@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 #[serde(default, rename_all = "camelCase")]
 pub struct State {
     pub settings: Settings,
+    pub discovered: Vec<Discovered>,
     pub session: Session,
     pub hosts: Vec<Host>,
     pub lan: Option<String>,
@@ -30,6 +31,47 @@ pub struct Settings {
     pub games: Vec<Game>,
     pub favorites: Vec<Favorite>,
     pub recents: Vec<String>,
+    pub directories: Vec<String>,
+    /// Identifiant public du joueur (sixm:…), à donner aux hôtes.
+    pub uid: String,
+}
+
+/// Serveur public annoncé sur le réseau local.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Discovered {
+    pub address: String,
+    pub name: String,
+}
+
+/// Menu envoyé par un serveur (voir server/menus.js).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Menu {
+    pub id: String,
+    pub title: String,
+    pub subtitle: String,
+    pub color: Option<String>,
+    pub items: Vec<MenuItem>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct MenuItem {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub label: String,
+    pub description: String,
+    pub right: String,
+    pub icon: String,
+    pub disabled: bool,
+    pub value: Value,
+    pub options: Vec<String>,
+    pub min: f64,
+    pub max: f64,
+    pub step: f64,
+    pub menu: Option<Box<Menu>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, serde::Serialize, PartialEq)]
@@ -83,6 +125,10 @@ pub struct Module {
 #[serde(default, rename_all = "camelCase")]
 pub struct Session {
     pub status: String,
+    pub uid: Option<String>,
+    pub admin: bool,
+    pub menu: Option<Menu>,
+    pub menu_seq: i64,
     pub attempt: i64,
     pub address: Option<String>,
     pub adapter: Option<String>,
@@ -94,6 +140,32 @@ pub struct Session {
     pub local: Option<Pos>,
     pub players: Vec<Player>,
     pub roster: Vec<Player>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct AccessEntry {
+    pub uid: String,
+    pub name: String,
+    pub at: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Access {
+    pub whitelist: Vec<AccessEntry>,
+    pub requests: Vec<AccessEntry>,
+    pub admins: Vec<AccessEntry>,
+}
+
+/// Joueur connecté à un serveur hébergé ici.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct HostPlayer {
+    pub id: i64,
+    pub name: String,
+    pub uid: Option<String>,
+    pub admin: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -121,6 +193,13 @@ pub struct Host {
     pub has_password: bool,
     pub mods: Vec<Mod>,
     pub broken: Option<String>,
+    pub visibility: String,
+    pub whitelist: bool,
+    pub tags: Vec<String>,
+    pub motd: String,
+    pub directories: Vec<String>,
+    pub access: Access,
+    pub players: Vec<HostPlayer>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -187,6 +266,23 @@ pub struct ServerInfo {
     pub password: bool,
     pub resources: Vec<String>,
     pub ping: u32,
+    pub tags: Vec<String>,
+    pub visibility: String,
+    pub whitelist: bool,
+}
+
+/// Serveur listé par un annuaire public.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Listed {
+    pub address: String,
+    pub name: String,
+    pub description: String,
+    pub players: u32,
+    pub max_players: u32,
+    pub password: bool,
+    pub whitelist: bool,
+    pub tags: Vec<String>,
 }
 
 #[derive(Clone)]

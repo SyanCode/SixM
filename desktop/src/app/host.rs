@@ -16,11 +16,29 @@ pub struct HostForm {
     pub password: String,
     pub remove_password: bool,
     pub has_password: bool,
+    pub public: bool,
+    pub whitelist: bool,
+    pub tags: String,
+    pub motd: String,
+    pub directories: String,
 }
 
 impl HostForm {
     pub fn new(port: u32) -> HostForm {
-        HostForm { name: String::new(), description: String::new(), max_players: "32".into(), port: port.to_string(), password: String::new(), remove_password: false, has_password: false }
+        HostForm {
+            name: String::new(),
+            description: String::new(),
+            max_players: "32".into(),
+            port: port.to_string(),
+            password: String::new(),
+            remove_password: false,
+            has_password: false,
+            public: true,
+            whitelist: false,
+            tags: String::new(),
+            motd: String::new(),
+            directories: String::new(),
+        }
     }
 
     pub fn from_host(h: &Host) -> HostForm {
@@ -32,6 +50,11 @@ impl HostForm {
             password: String::new(),
             remove_password: false,
             has_password: h.has_password,
+            public: h.visibility != "private",
+            whitelist: h.whitelist,
+            tags: h.tags.join(", "),
+            motd: h.motd.clone(),
+            directories: h.directories.join("\n"),
         }
     }
 
@@ -57,6 +80,36 @@ impl HostForm {
                 ui.label("Retirer le mot de passe");
             });
         }
+        ui.add_space(4.0);
+        theme::field(ui, "Visibilité", |ui| {
+            ui.horizontal(|ui| {
+                if choice_chip(ui, ic::GLOBE, "Public", "Annoncé sur votre réseau local et dans les annuaires.", self.public).clicked() {
+                    self.public = true;
+                }
+                if choice_chip(ui, ic::EYE_SLASH, "Privé", "Seulement avec l'adresse. La liste des joueurs reste cachée.", !self.public).clicked() {
+                    self.public = false;
+                }
+            });
+        });
+        ui.horizontal(|ui| {
+            theme::switch(ui, &mut self.whitelist);
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                ui.label(theme::strong("Liste blanche", 14.0));
+                ui.label(theme::muted("Seuls les joueurs que vous acceptez peuvent entrer. Les autres envoient une demande."));
+            });
+        });
+        if full {
+            ui.add_space(4.0);
+            theme::field(ui, "Tags (séparés par des virgules)", |ui| theme::text_edit(ui, &mut self.tags, "RP, FR, Course"));
+            theme::field(ui, "Message d'accueil", |ui| theme::text_edit(ui, &mut self.motd, "Affiché aux joueurs à leur arrivée"));
+            if self.public {
+                theme::field(ui, "Annuaires où s'inscrire (un par ligne)", |ui| {
+                    ui.add(egui::TextEdit::multiline(&mut self.directories).hint_text("http://annuaire.exemple.net:30100").desired_rows(2).desired_width(f32::INFINITY))
+                });
+            }
+            self.motd.truncate(256);
+        }
         self.name.truncate(64);
         self.description.truncate(256);
         self.password.truncate(128);
@@ -69,7 +122,16 @@ impl HostForm {
         }
         let max: u32 = self.max_players.trim().parse().ok().filter(|n| (1..=1024).contains(n)).ok_or("places : entre 1 et 1024")?;
         let port: u32 = self.port.trim().parse().ok().filter(|n| (1..=65535).contains(n)).ok_or("port : entre 1 et 65535")?;
-        let mut v = json!({ "name": name, "description": self.description.trim(), "maxPlayers": max, "port": port });
+        let tags: Vec<String> = self.tags.split(',').map(|t| t.trim().chars().take(24).collect::<String>()).filter(|t| !t.is_empty()).take(8).collect();
+        let directories: Vec<String> = self.directories.lines().map(|l| l.trim().trim_end_matches('/').to_string()).filter(|l| !l.is_empty()).collect();
+        if directories.len() > 4 || directories.iter().any(|d| !(d.starts_with("http://") || d.starts_with("https://")) || d.split("://").nth(1).is_none_or(|h| h.is_empty() || h.contains('/'))) {
+            return Err("annuaires : jusqu'à 4 adresses http://hôte:port".into());
+        }
+        let mut v = json!({
+            "name": name, "description": self.description.trim(), "maxPlayers": max, "port": port,
+            "visibility": if self.public { "public" } else { "private" }, "whitelist": self.whitelist,
+            "tags": tags, "motd": self.motd.trim(), "directories": directories,
+        });
         if !self.password.is_empty() {
             v["password"] = json!(self.password);
         } else if self.remove_password {
@@ -170,7 +232,7 @@ impl SixmApp {
                     for h in &hosts {
                         if host_card(ui, tw, h) {
                             self.host_id = Some(h.id.clone());
-                            self.host_tab = if h.status == "running" { HostTab::Console } else { HostTab::Mods };
+                            self.host_tab = if !h.access.requests.is_empty() || h.status == "running" { HostTab::Players } else { HostTab::Settings };
                             self.host_form = None;
                         }
                     }
@@ -226,6 +288,14 @@ impl SixmApp {
                             }
                             let on = h.mods.iter().filter(|m| m.enabled).count();
                             ui.label(theme::muted(format!("·  {on} mod(s) actif(s)")));
+                            if h.visibility == "private" {
+                                theme::pill(ui, "Privé", MUTED);
+                            } else {
+                                theme::pill(ui, "Public", ACCENT);
+                            }
+                            if h.whitelist {
+                                theme::pill(ui, "Liste blanche", YELLOW);
+                            }
                         });
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -253,7 +323,10 @@ impl SixmApp {
             ui.add_space(16.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
+                let waiting = h.access.requests.len();
+                let players_label = if waiting > 0 { format!("Joueurs ({waiting} demande{})", if waiting > 1 { "s" } else { "" }) } else { format!("Joueurs ({})", h.players.len()) };
                 for (tab, icon, label) in [
+                    (HostTab::Players, ic::USERS, players_label.as_str()),
                     (HostTab::Console, ic::TERMINAL_WINDOW, "Console"),
                     (HostTab::Mods, ic::PUZZLE_PIECE, "Mods"),
                     (HostTab::Settings, ic::SLIDERS_HORIZONTAL, "Réglages"),
@@ -268,12 +341,104 @@ impl SixmApp {
             ui.painter().rect_filled(r, 0, LINE);
             ui.add_space(16.0);
             match self.host_tab {
+                HostTab::Players => self.players_tab(ui, &h),
                 HostTab::Console => self.console_tab(ui, &h),
                 HostTab::Mods => self.mods_tab(ui, &h),
                 HostTab::Settings => self.host_settings_tab(ui, &h),
                 HostTab::Share => self.share_tab(ui, &h),
             }
         });
+    }
+
+    fn players_tab(&mut self, ui: &mut Ui, h: &Host) {
+        let id = h.id.clone();
+        let access = |app: &SixmApp, action: &str, uid: &str, name: &str| {
+            app.post("/api/hosts/access", json!({ "id": id, "action": action, "uid": uid, "name": name }));
+        };
+
+        // Demandes d'accès d'abord : c'est ce qui attend l'hôte.
+        if h.whitelist || !h.access.requests.is_empty() {
+            theme::caption(ui, &format!("Demandes d'accès ({})", h.access.requests.len()));
+            if h.access.requests.is_empty() {
+                ui.label(theme::muted("Aucune demande. Un joueur refusé par la liste blanche apparaît ici."));
+            }
+            for r in &h.access.requests {
+                person_row(ui, &r.name, &r.uid, &format!("le {}", short_date(&r.at)), |ui| {
+                    if theme::button(ui, Kind::Ghost, ic::X, "Refuser").clicked() {
+                        access(self, "deny", &r.uid, &r.name);
+                    }
+                    if theme::button(ui, Kind::Primary, ic::CHECK, "Accepter").clicked() {
+                        access(self, "approve", &r.uid, &r.name);
+                    }
+                });
+            }
+            ui.add_space(14.0);
+        }
+
+        theme::caption(ui, &format!("Connectés ({})", h.players.len()));
+        if h.status != "running" {
+            ui.label(theme::muted("Démarrez le serveur pour voir les joueurs."));
+        } else if h.players.is_empty() {
+            ui.label(theme::muted("Personne pour l'instant."));
+        }
+        for p in &h.players {
+            let uid = p.uid.clone().unwrap_or_default();
+            let sub = if uid.is_empty() { format!("#{}  ·  sans identité", p.id) } else { format!("#{}  ·  {uid}", p.id) };
+            person_row(ui, &p.name, &sub, if p.admin { "Admin" } else { "" }, |ui| {
+                let act = |app: &SixmApp, action: &str| app.post("/api/hosts/player", json!({ "id": h.id, "player": p.id, "action": action }));
+                if theme::button(ui, Kind::Danger, ic::PROHIBIT, "Bannir").clicked() {
+                    let (hid, pid, name) = (h.id.clone(), p.id, p.name.clone());
+                    self.confirm(
+                        &format!("Bannir {name} ?"),
+                        "Par son adresse IP et son identifiant. Levez le bannissement depuis la console (bans, unban).",
+                        "Bannir",
+                        Box::new(move |app: &mut SixmApp| app.post("/api/hosts/player", json!({ "id": hid, "player": pid, "action": "ban" }))),
+                    );
+                }
+                if theme::button(ui, Kind::Normal, ic::SIGN_OUT, "Expulser").clicked() {
+                    act(self, "kick");
+                }
+                if !uid.is_empty() {
+                    let (icon, text, action) = if p.admin { (ic::CROWN, "Retirer admin", "unadmin") } else { (ic::CROWN, "Nommer admin", "admin") };
+                    if theme::button(ui, Kind::Ghost, icon, text).clicked() {
+                        act(self, action);
+                    }
+                }
+            });
+        }
+        ui.add_space(14.0);
+
+        theme::caption(ui, &format!("Liste blanche ({})", h.access.whitelist.len()));
+        if !h.whitelist {
+            ui.label(theme::muted("Désactivée : tout le monde peut entrer. Activez-la dans Réglages."));
+        }
+        for e in &h.access.whitelist {
+            person_row(ui, &e.name, &e.uid, "", |ui| {
+                if theme::button(ui, Kind::Ghost, ic::TRASH, "Retirer").clicked() {
+                    access(self, "remove", &e.uid, &e.name);
+                }
+            });
+        }
+        ui.horizontal(|ui| {
+            let w = ui.available_width() - 130.0;
+            theme::input(ui, &mut self.host_uid, "Ajouter un identifiant : sixm:…", ic::IDENTIFICATION_CARD, w);
+            let uid = self.host_uid.trim().to_string();
+            if theme::button_sized(ui, Kind::Normal, ic::PLUS, "Ajouter", vec2(120.0, 38.0), uid.starts_with("sixm:")).clicked() {
+                access(self, "approve", &uid, "");
+                self.host_uid.clear();
+            }
+        });
+        ui.add_space(14.0);
+
+        theme::caption(ui, &format!("Administrateurs ({})", h.access.admins.len()));
+        ui.label(theme::muted("Ils voient le menu Administration en jeu (touche M) et passent la liste blanche."));
+        for e in &h.access.admins {
+            person_row(ui, &e.name, &e.uid, "Admin", |ui| {
+                if theme::button(ui, Kind::Ghost, ic::TRASH, "Retirer").clicked() {
+                    access(self, "unadmin", &e.uid, &e.name);
+                }
+            });
+        }
     }
 
     fn console_tab(&mut self, ui: &mut Ui, h: &Host) {
@@ -444,6 +609,51 @@ impl SixmApp {
     }
 }
 
+/// Ligne d'une personne : avatar, nom, identifiant, actions à droite.
+fn person_row(ui: &mut Ui, name: &str, sub: &str, badge: &str, actions: impl FnOnce(&mut Ui)) {
+    egui::Frame::new().fill(CARD).stroke(Stroke::new(1.0, LINE)).corner_radius(8).inner_margin(egui::Margin::symmetric(14, 10)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            let shown = if name.is_empty() { "?" } else { name };
+            theme::hex_avatar(ui, 32.0, shown, false);
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 1.0;
+                ui.horizontal(|ui| {
+                    ui.label(theme::strong(if name.is_empty() { "Sans nom" } else { name }, 14.5));
+                    if !badge.is_empty() {
+                        theme::tag(ui, badge);
+                    }
+                });
+                ui.label(RichText::new(sub).font(theme::mono(11.5)).color(MUTED));
+            });
+            ui.with_layout(Layout::right_to_left(Align::Center), actions);
+        });
+    });
+    ui.add_space(4.0);
+}
+
+fn short_date(iso: &str) -> String {
+    // 2026-11-26T08:54:55Z -> 26/11 à 08:54
+    let (d, t) = iso.split_once('T').unwrap_or((iso, ""));
+    let parts: Vec<&str> = d.split('-').collect();
+    if parts.len() == 3 && t.len() >= 5 { format!("{}/{} à {}", parts[2], parts[1], &t[..5]) } else { iso.to_string() }
+}
+
+/// Carte de choix exclusive (Public / Privé).
+fn choice_chip(ui: &mut Ui, icon: &str, title: &str, text: &str, on: bool) -> egui::Response {
+    let w = ((ui.available_width() - 8.0) / 2.0).max(160.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 64.0), Sense::click());
+    let t = ui.ctx().animate_bool_with_time(resp.id, on, 0.12);
+    let p = ui.painter();
+    p.rect_filled(rect, 8, CARD.lerp_to_gamma(ACCENT.gamma_multiply(0.14), t));
+    p.rect_stroke(rect, 8, Stroke::new(1.0, LINE.lerp_to_gamma(ACCENT, t)), StrokeKind::Inside);
+    p.text(pos2(rect.left() + 22.0, rect.center().y), Align2::CENTER_CENTER, icon, theme::f(20.0), if on { ACCENT } else { MUTED });
+    p.text(pos2(rect.left() + 42.0, rect.top() + 20.0), Align2::LEFT_CENTER, title, theme::fs(14.0), TEXT);
+    let g = p.layout(text.to_string(), theme::f(12.0), MUTED, rect.width() - 52.0);
+    p.galley(pos2(rect.left() + 42.0, rect.top() + 32.0), g, MUTED);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 fn host_card(ui: &mut Ui, w: f32, h: &Host) -> bool {
     let (rect, resp) = ui.allocate_exact_size(vec2(w, 104.0), Sense::click());
     let t = ui.ctx().animate_bool_with_time(resp.id, resp.hovered(), 0.12);
@@ -459,6 +669,14 @@ fn host_card(ui: &mut Ui, w: f32, h: &Host) -> bool {
     p.text(pos2(rect.left() + 70.0, rect.top() + 50.0), Align2::LEFT_CENTER, sub, theme::f(12.5), MUTED);
     let (word, color) = status(h);
     let pr = Rect::from_min_size(pos2(rect.left() + 16.0, rect.bottom() - 32.0), vec2(rect.width() - 32.0, 22.0));
+    let mut flags = vec![if h.visibility == "private" { "Privé" } else { "Public" }];
+    if h.whitelist {
+        flags.push("Liste blanche");
+    }
+    if !h.access.requests.is_empty() {
+        flags.push("Demandes en attente");
+    }
+    p.text(pos2(pr.right() - 22.0, pr.center().y), Align2::RIGHT_CENTER, flags.join("  ·  "), theme::f(12.0), if h.access.requests.is_empty() { DIM } else { YELLOW });
     p.circle_filled(pos2(pr.left() + 4.0, pr.center().y), 4.0, color);
     p.text(pos2(pr.left() + 14.0, pr.center().y), Align2::LEFT_CENTER, word, theme::fs(12.5), color);
     p.text(pos2(pr.right(), pr.center().y), Align2::RIGHT_CENTER, ic::CARET_RIGHT, theme::f(15.0), DIM.lerp_to_gamma(TEXT, t));

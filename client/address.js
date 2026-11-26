@@ -30,5 +30,7 @@ export async function queryServer(address, { timeoutMs = 3000 } = {}) {
     name: str(m.name, 64) || 'Serveur SixM', description: str(m.description, 256),
     players: num(m.players), maxPlayers: num(m.maxPlayers), password: m.password === true,
     resources: Array.isArray(m.resources) ? m.resources.slice(0, 64).map((r) => str(r, 32)) : [], ping,
+    tags: Array.isArray(m.tags) ? m.tags.slice(0, 8).map((t) => str(t, 24)).filter(Boolean) : [],
+    visibility: m.visibility === 'private' ? 'private' : 'public', whitelist: m.whitelist === true,
   };
 }

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
+import { playerUid, verifyChallenge } from '../identity.js';
 
 const PING_MS = 15000;
 const MAX_BUFFERED = 1 << 20;
@@ -11,13 +12,13 @@ const sha256 = (s) => crypto.createHash('sha256').update(s).digest();
 
 /**
  * Protocole JSON sur WebSocket (voir docs/PROTOCOL.md).
- * client -> serveur : hello | pos | event
- * serveur -> client : welcome | roster | snapshot | event | kick
+ * client -> serveur : hello | pos | event | menu | menuOpen
+ * serveur -> client : challenge | welcome | roster | snapshot | event | menu | menuClose | kick
  * Le même port sert /info.json et /players.json en HTTP.
  */
 export class Network {
-  constructor({ port, world, events, config, resources, bans }) {
-    Object.assign(this, { port, world, events, config, resources, bans });
+  constructor({ port, world, events, config, resources, bans, access, menus }) {
+    Object.assign(this, { port, world, events, config, resources, bans, access, menus });
     this.rate = new WeakMap();
     this.connections = new Map(); // ip -> nombre de connexions
     this.failures = new Map(); // ip -> { start, n }
@@ -60,31 +61,40 @@ export class Network {
     const p = this.world.players.get(id);
     if (p) this.#reject(p.socket, String(reason));
   }
+  isAdmin(id) { return !!this.access?.isAdmin(this.world.players.get(id)?.uid); }
   ban(id, reason = 'sans raison') {
     const p = this.world.players.get(id);
     if (!p) return;
-    this.bans.add(p.ip, p.name, String(reason));
+    this.bans.add(p.ip, p.name, String(reason), p.uid);
     for (const other of [...this.world.players.values()])
-      if (other.ip === p.ip) this.kick(other.id, `banni : ${reason}`);
+      if (other.ip === p.ip || (p.uid && other.uid === p.uid)) this.kick(other.id, `banni : ${reason}`);
   }
 
   /** Fiche publique du serveur : ni mot de passe, ni IP. */
   info() {
-    const { name, description, maxPlayers, password, tickRate, syncRadius } = this.config;
+    const { name, description, maxPlayers, password, tickRate, syncRadius, tags, visibility, whitelist } = this.config;
     return {
-      name, description, maxPlayers, tickRate, syncRadius,
+      name, description, maxPlayers, tickRate, syncRadius, tags, visibility, whitelist,
       players: this.world.players.size, password: password !== '',
       resources: [...this.resources.running.keys()],
     };
   }
 
+  /** Joueurs connectés, pour le roster et la console. */
+  roster() {
+    return [...this.world.players.values()].map(({ id, name, uid }) => ({ id, name, admin: !!this.access?.isAdmin(uid) }));
+  }
+
   #onRequest(req, res) {
-    let body = null;
+    let body = null, status = 404;
     if (req.method === 'GET' && req.url === '/info.json') body = this.info();
-    else if (req.method === 'GET' && req.url === '/players.json')
-      body = [...this.world.players.values()].map(({ id, name }) => ({ id, name }));
-    res.writeHead(body ? 200 : 404, { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' });
-    res.end(JSON.stringify(body ?? { error: 'introuvable' }));
+    else if (req.method === 'GET' && req.url === '/players.json') {
+      // Serveur privé : la liste des joueurs n'est pas publique.
+      if (this.config.visibility === 'private') status = 403;
+      else body = [...this.world.players.values()].map(({ id, name }) => ({ id, name }));
+    }
+    res.writeHead(body ? 200 : status, { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' });
+    res.end(JSON.stringify(body ?? { error: status === 403 ? 'serveur privé' : 'introuvable' }));
   }
 
   #ipOf(req) {
@@ -99,8 +109,8 @@ export class Network {
   }
 
   /** Raison du refus, ou null si le joueur peut entrer. */
-  #refusal(m, ip) {
-    const ban = this.bans.get(ip);
+  #refusal(m, ip, uid) {
+    const ban = this.bans.get(ip, uid);
     if (ban) return `banni : ${ban.reason}`;
     if (this.config.password) {
       let f = this.failures.get(ip);
@@ -112,7 +122,16 @@ export class Network {
       }
       this.failures.delete(ip);
     }
-    if (this.world.players.size >= this.config.maxPlayers) return 'serveur plein';
+    if (uid && [...this.world.players.values()].some((p) => p.uid === uid)) return 'déjà connecté avec cette identité';
+    const admin = this.access?.isAdmin(uid);
+    if (this.config.whitelist && !admin) {
+      if (!uid) return 'ce serveur a une liste blanche : mettez SixM à jour';
+      if (!this.access.allowed(uid)) {
+        if (this.access.request(uid, m.name)) this.events.emit('accessRequest', { uid, name: String(m.name).slice(0, 24) });
+        return `liste blanche : demande envoyée à l'hôte (votre identifiant : ${uid})`;
+      }
+    }
+    if (this.world.players.size >= this.config.maxPlayers && !admin) return 'serveur plein';
     return null;
   }
 
@@ -122,6 +141,8 @@ export class Network {
     const count = (this.connections.get(ip) ?? 0) + 1;
     this.connections.set(ip, count);
     const helloTimeout = setTimeout(() => ws.close(), 5000);
+    // Défi signé par le client : prouve son identité sans rien révéler.
+    const nonce = crypto.randomBytes(16).toString('hex');
     ws.alive = true;
     ws.on('pong', () => { ws.alive = true; });
 
@@ -131,11 +152,12 @@ export class Network {
       if (n > 0) this.connections.set(ip, n); else this.connections.delete(ip);
       if (!player) return;
       this.world.removePlayer(player.id);
-      this.#sendRoster();
+      this.sendRoster();
       this.events.emit('playerDropped', player);
     });
 
     if (count > this.config.maxConnectionsPerIp) return this.#reject(ws, 'trop de connexions depuis cette adresse');
+    this.send(ws, { t: 'challenge', nonce });
 
     ws.on('message', (raw) => {
       if (ws.readyState !== 1) return; // refusé ou expulsé : on n'écoute plus
@@ -146,16 +168,17 @@ export class Network {
 
       if (!player) {
         if (m.t !== 'hello' || typeof m.name !== 'string') return ws.close();
-        const refusal = this.#refusal(m, ip);
+        const uid = m.key !== undefined && verifyChallenge(m.key, nonce, m.sig) ? playerUid(m.key) : null;
+        const refusal = this.#refusal(m, ip, uid);
         if (refusal) return this.#reject(ws, refusal);
         clearTimeout(helloTimeout);
         const name = m.name.replace(/[^\p{L}\p{N}_ -]/gu, '').slice(0, 24) || 'Joueur';
-        player = this.world.addPlayer(name, ws, ip);
+        player = this.world.addPlayer(name, ws, ip, uid);
         this.send(ws, {
-          t: 'welcome', id: player.id, server: this.config.name,
+          t: 'welcome', id: player.id, server: this.config.name, uid, motd: this.config.motd,
           tickRate: this.config.tickRate, resources: this.resources.clientBundle(),
         });
-        this.#sendRoster();
+        this.sendRoster();
         this.events.emit('playerConnected', player);
         return;
       }
@@ -166,13 +189,19 @@ export class Network {
       } else if (m.t === 'event' && typeof m.name === 'string') {
         // Les évènements réseau sont préfixés pour ne pas écraser les évènements internes.
         this.events.emit(`net:${m.name}`, player, ...(Array.isArray(m.args) ? m.args : []));
+      } else if (m.t === 'menuOpen') {
+        this.menus?.main(player);
+      } else if (m.t === 'menu' && typeof m.menu === 'string' && typeof m.item === 'string') {
+        const value = ['boolean', 'number'].includes(typeof m.value) && (typeof m.value !== 'number' || Number.isFinite(m.value)) ? m.value : null;
+        this.menus?.select(player, m.menu.slice(0, 48), m.item.slice(0, 48), value);
       }
     });
   }
 
   /** Tous les joueurs, même sans position connue ou hors du rayon de synchro. */
-  #sendRoster() {
-    this.broadcast({ t: 'roster', players: [...this.world.players.values()].map(({ id, name }) => ({ id, name })) });
+  sendRoster() {
+    this.broadcast({ t: 'roster', players: this.roster() });
+    this.events.emit('rosterChanged');
   }
 
   // Limite simple : 200 messages / seconde / connexion

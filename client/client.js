@@ -1,6 +1,8 @@
 import WebSocket from 'ws';
 import { PositionBuffer } from './interpolation.js';
 import { ScriptSandbox } from './sandbox.js';
+import { signChallenge } from '../server/identity.js';
+import { cleanMenu } from '../server/menus.js';
 
 const samePos = (a, b) => a && a.x === b.x && a.y === b.y && a.z === b.z && a.h === b.h;
 const isPos = (p) => p && [p.x, p.y, p.z, p.h].every(Number.isFinite);
@@ -10,11 +12,11 @@ const clean = (text, max = 500) => String(text).replace(/[\u0000-\u001f\u007f-\u
 /** Client SixM : connexion, sync de position, exécution isolée des scripts client des ressources. */
 export class SixMClient {
   constructor({
-    url, name, adapter, password, posIntervalMs = 50, renderIntervalMs = 33,
+    url, name, adapter, password, identity = null, posIntervalMs = 50, renderIntervalMs = 33,
     interpolationDelayMs = 100, connectTimeoutMs = 10000, onDisconnect = null,
   }) {
     Object.assign(this, {
-      url, name, adapter, password, posIntervalMs, renderIntervalMs,
+      url, name, adapter, password, identity, posIntervalMs, renderIntervalMs,
       interpolationDelayMs, connectTimeoutMs, onDisconnect,
     });
     this.id = null;
@@ -22,6 +24,9 @@ export class SixMClient {
     this.roster = []; // tous
     this.remotes = new Map(); // id -> { name, buffer, applied }
     this.kickReason = null;
+    this.uid = null; // identifiant vérifié par le serveur
+    this.menu = null; // menu ouvert par le serveur
+    this.menuSeq = 0;
   }
 
   async connect() {
@@ -53,12 +58,23 @@ export class SixMClient {
       const ws = this.ws = new WebSocket(this.url, { maxPayload: 16 << 20 });
       const timer = setTimeout(() => reject(new Error('délai de connexion dépassé')), this.connectTimeoutMs);
       const fail = (e) => { clearTimeout(timer); reject(e); };
-      ws.on('open', () => this.#send({ t: 'hello', name: this.name, password: this.password }));
+      // Le serveur commence par un défi ; un serveur plus ancien n'en envoie pas.
+      let said = false, fallback;
+      const hello = (nonce) => {
+        if (said) return;
+        said = true;
+        clearTimeout(fallback);
+        const m = { t: 'hello', name: this.name, password: this.password };
+        if (nonce && this.identity) Object.assign(m, { key: this.identity.publicKey, sig: signChallenge(this.identity, nonce) });
+        this.#send(m);
+      };
+      ws.on('open', () => { fallback = setTimeout(() => hello(null), 1500); });
       ws.on('error', fail);
       ws.on('message', (raw) => {
         let m;
         try { m = JSON.parse(raw); } catch { return; }
         if (!m || typeof m !== 'object') return;
+        if (m.t === 'challenge') return hello(typeof m.nonce === 'string' ? m.nonce.slice(0, 64) : null);
         try {
           this.#onMessage(m);
         } catch (e) {
@@ -73,6 +89,7 @@ export class SixMClient {
         }
       });
       ws.on('close', () => {
+        clearTimeout(fallback);
         if (!welcomed) return fail(new Error(this.kickReason ?? 'connexion refusée par le serveur'));
         this.#stop();
         this.onDisconnect?.(this.kickReason);
@@ -81,6 +98,16 @@ export class SixMClient {
   }
 
   emitServer(name, ...args) { this.#send({ t: 'event', name, args }); }
+
+  /** Touche Menu : le serveur répond par son menu principal. */
+  openMenu() { this.#send({ t: 'menuOpen' }); }
+  /** Choix dans un menu : bouton validé, case cochée, liste ou curseur changé. */
+  selectMenu(menu, item, value = null) { this.#send({ t: 'menu', menu: String(menu), item: String(item), value }); }
+  closeMenu() {
+    this.menu = null;
+    this.menuSeq++;
+    this.adapter.setMenu?.(null);
+  }
 
   async disconnect() {
     this.onDisconnect = null;
@@ -96,6 +123,7 @@ export class SixMClient {
     for (const id of this.remotes.keys()) this.adapter.removeRemotePlayer(id);
     this.remotes.clear();
     this.players = [];
+    this.menu = null;
     this.sandbox?.dispose();
   }
 
@@ -117,7 +145,9 @@ export class SixMClient {
       if (!Number.isSafeInteger(m.id)) throw new Error('accueil invalide');
       this.id = m.id;
       this.serverName = clean(m.server ?? '', 64);
+      this.uid = typeof m.uid === 'string' ? clean(m.uid, 40) : null;
       this.sandbox.load(m.resources);
+      if (typeof m.motd === 'string' && m.motd.trim()) this.adapter.log(clean(m.motd, 256));
     } else if (m.t === 'snapshot') {
       if (!Array.isArray(m.players)) return;
       const now = performance.now();
@@ -139,10 +169,16 @@ export class SixMClient {
     } else if (m.t === 'roster') {
       if (!Array.isArray(m.players)) return;
       this.roster = m.players.slice(0, 1024).filter((p) => Number.isSafeInteger(p?.id))
-        .map((p) => ({ id: p.id, name: clean(p.name, 24) }));
+        .map((p) => ({ id: p.id, name: clean(p.name, 24), admin: p.admin === true }));
       this.adapter.setRoster(this.serverName, this.roster.map((p) => p.name));
     } else if (m.t === 'event') {
       if (typeof m.name === 'string' && Array.isArray(m.args)) this.sandbox.dispatch(m.name, m.args);
+    } else if (m.t === 'menu') {
+      try { this.menu = cleanMenu(m.menu); } catch { return; }
+      this.menuSeq++;
+      this.adapter.setMenu?.(this.menu);
+    } else if (m.t === 'menuClose') {
+      this.closeMenu();
     } else if (m.t === 'kick') {
       this.kickReason = clean(m.reason);
       this.adapter.log(`Déconnecté: ${this.kickReason}`);

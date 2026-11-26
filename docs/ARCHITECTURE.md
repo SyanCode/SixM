@@ -17,7 +17,13 @@ client/link.js            compile et lance SixM Link
 link/SixMLink.cs          bridge et surcouche sur VIctory (Windows)
 client/address.js         adresses et fiche d'un serveur
 server/config.js          lecture et contrôle de server.json
-server/bans.js            bannissements par IP
+server/bans.js            bannissements par IP et par identifiant
+server/identity.js        identité des joueurs : clé Ed25519, défi signé, identifiant sixm:…
+server/access.js          liste blanche, demandes d'accès, administrateurs (access.json)
+server/menus.js           menus des mods : forme vérifiée, menu principal (docs/MENUS.md)
+server/announce.js        serveur public : diffusion sur le réseau local, inscription aux annuaires
+server/directory.js       annuaire de serveurs publics (sixm directory)
+app/discovery.js          serveurs du réseau local, lecture des annuaires
 server/console.js         console d'administration
 server/core/network.js    WebSocket, handshake, mot de passe, info HTTP, tick, snapshots
 server/core/world.js      joueurs

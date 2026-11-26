@@ -15,6 +15,12 @@ export const DEFAULTS = {
   resourcesDir: 'resources',
   autostart: [],
   bansFile: null, // null : bannissements en mémoire
+  accessFile: null, // liste blanche et admins ; null : en mémoire
+  visibility: 'public', // public : annoncé sur le réseau local et aux annuaires ; private : seulement par adresse
+  whitelist: false, // true : seuls les joueurs acceptés par l'hôte entrent
+  tags: [],
+  motd: '', // message d'accueil, affiché à l'arrivée
+  directories: [], // annuaires publics où s'inscrire (http://hôte:port)
 };
 
 const int = (min, max) => (v) => Number.isInteger(v) && v >= min && v <= max;
@@ -34,6 +40,12 @@ const RULES = {
   resourcesDir: text(1024),
   autostart: (v) => Array.isArray(v) && v.every(text(64)),
   bansFile: nullable(text(1024)),
+  accessFile: nullable(text(1024)),
+  visibility: (v) => v === 'public' || v === 'private',
+  whitelist: (v) => typeof v === 'boolean',
+  tags: (v) => Array.isArray(v) && v.length <= 8 && v.every((t) => text(24)(t) && t.trim() !== ''),
+  motd: text(256),
+  directories: (v) => Array.isArray(v) && v.length <= 4 && v.every((u) => text(255)(u) && /^https?:\/\/[^\s/]+\/?$/.test(u)),
 };
 
 export function normalizeConfig(raw) {
@@ -60,5 +72,6 @@ export function loadConfig(dir) {
   const config = normalizeConfig(raw);
   config.resourcesDir = path.resolve(dir, config.resourcesDir);
   config.bansFile = path.resolve(dir, config.bansFile ?? 'bans.json');
+  config.accessFile = path.resolve(dir, config.accessFile ?? 'access.json');
   return config;
 }

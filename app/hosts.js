@@ -3,12 +3,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { loadConfig, normalizeConfig } from '../server/config.js';
+import { AccessList } from '../server/access.js';
 import { CLI, scaffoldServer } from '../server/scaffold.js';
 import { importMod, listMods } from './mods.js';
 import { packServer } from './pack.js';
 
 const MAX_LOG = 300;
-const EDITABLE = ['name', 'description', 'port', 'maxPlayers', 'password', 'syncRadius'];
+const EDITABLE = ['name', 'description', 'port', 'maxPlayers', 'password', 'syncRadius', 'visibility', 'whitelist', 'tags', 'motd', 'directories'];
 
 /** Adresse IPv4 utilisée pour sortir sur le réseau (ignore les cartes virtuelles), ou null. */
 export const lanAddress = () => new Promise((resolve) => {
@@ -34,13 +35,15 @@ export class Hosts {
   list() {
     return this.ids().map((id) => {
       const run = this.running.get(id);
-      const base = { id, dir: this.path(id), status: run?.status ?? 'stopped', log: run?.log ?? [], stale: run?.stale ?? false };
+      const live = ['starting', 'running'].includes(run?.status);
+      const base = { id, dir: this.path(id), status: run?.status ?? 'stopped', log: run?.log ?? [], stale: run?.stale ?? false, players: live ? run.players : [] };
       try {
         const c = this.#read(id);
-        const { password, name, description, port, maxPlayers, syncRadius, autostart } = normalizeConfig(c);
+        const { password, name, description, port, maxPlayers, syncRadius, autostart, visibility, whitelist, tags, motd, directories } = normalizeConfig(c);
         const all = autostart.includes('*');
         return {
           ...base, name, description, port, maxPlayers, syncRadius, hasPassword: password !== '',
+          visibility, whitelist, tags, motd, directories, access: this.#access(id).data,
           mods: listMods(this.#resources(id)).map((m) => ({ ...m, enabled: all || autostart.includes(m.name) })),
         };
       } catch (e) {
@@ -82,10 +85,15 @@ export class Hosts {
     delete env.SIXM_PORT;
     delete env.SIXM_PASSWORD;
     const child = spawn(process.execPath, [CLI, 'start', dir], { env, windowsHide: true });
-    const run = { process: child, status: 'starting', log: [], stale: false };
+    const run = { process: child, status: 'starting', log: [], stale: false, players: [] };
     this.running.set(id, run);
     const add = (chunk) => {
-      for (const line of chunk.split(/\r?\n/)) if (line) run.log.push(line.slice(0, 500));
+      for (const line of chunk.split(/\r?\n/)) {
+        // État envoyé par le serveur pour l'application : joueurs connectés.
+        if (line.startsWith('@sixm ')) {
+          try { run.players = JSON.parse(line.slice(6)).players.slice(0, 1024); } catch { /* ligne coupée */ }
+        } else if (line) run.log.push(line.slice(0, 500));
+      }
       run.log.splice(0, run.log.length - MAX_LOG);
       if (run.status === 'starting' && chunk.includes('en écoute sur')) run.status = 'running';
     };
@@ -134,6 +142,35 @@ export class Hosts {
     const { port, password } = loadConfig(this.path(id));
     return { address: `localhost:${port}`, password };
   }
+
+  /** Liste blanche, demandes et admins, que le serveur tourne ou non. */
+  access(id, action, uid, name = '') {
+    const list = this.#access(id);
+    switch (action) {
+      case 'approve': list.add(uid, name); break;
+      case 'deny': list.deny(uid); break;
+      case 'remove': list.remove(uid); break;
+      case 'admin': list.setAdmin(uid, name, true); break;
+      case 'unadmin': list.setAdmin(uid, name, false); break;
+      default: throw new Error('action inconnue');
+    }
+    this.#quiet(id, 'access reload');
+  }
+
+  /** Expulser, bannir, nommer admin un joueur connecté. */
+  playerAction(id, player, action) {
+    if (!Number.isSafeInteger(player)) throw new Error('joueur inconnu');
+    const line = { kick: `kick ${player}`, ban: `ban ${player} banni par l'hôte`, admin: `admin ${player}`, unadmin: `admin ${player} off` }[action];
+    if (!line) throw new Error('action inconnue');
+    this.command(id, line);
+  }
+
+  #quiet(id, line) {
+    const run = this.running.get(id);
+    if (run?.status === 'running') run.process.stdin.write(`${line}\n`);
+  }
+
+  #access(id) { return new AccessList(loadConfig(this.path(id)).accessFile); }
 
   importMod(id, buffer, fileName) { return importMod(this.#resources(id), buffer, fileName); }
 
