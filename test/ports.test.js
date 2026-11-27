@@ -10,7 +10,7 @@ import { cleanOptions, customPort, isRepo, portEnv, PORTS } from '../app/ports.j
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'sixm-'));
 
 test('catalogue : ids uniques, commits épinglés, dépôts GitHub', () => {
-  assert.deepEqual(PORTS.map((p) => p.id), ['victory', 'belobug-amd']);
+  assert.deepEqual(PORTS.map((p) => p.id), ['victory', 'belobug-amd', 'tequesta']);
   for (const p of PORTS) {
     assert.match(p.pinned, /^[0-9a-f]{40}$/, p.id);
     assert.ok(isRepo(p.repo), p.repo);
@@ -30,6 +30,9 @@ test('options de lancement : variables d\'environnement du portage', () => {
   assert.deepEqual([safe.VICTORY_UNDER_WIDE, safe.VICTORY_BVH_BUILDER, safe.VICTORY_FSR_4K, safe.VICTORY_FIDELITYFX_DIR], ['0', '1', 'balanced', 'C:\\FSR']);
   assert.deepEqual(cleanOptions(amd, { fsr4k: 'ultra', safe: 'oui' }), { safe: false, rayTracing: false, unlock: false, fsr4k: '', fidelityfx: '' });
   assert.deepEqual(portEnv(PORTS[0], { safe: true }), {}, 'VIctory : aucune option');
+  const teq = PORTS.find((p) => p.id === 'tequesta');
+  assert.deepEqual(portEnv(teq, {}), { VICTORY_THIN: '1', VICTORY_JOIN_PARTS: '8', VICTORY_CARD_REHASH_RUNS: '1', VICTORY_KBM_NATIVE: '1', VICTORY_PORT_STATIC: '1', VICTORY_RAW_VIEWS: '0' }, 'profil NVIDIA recommandé');
+  assert.equal(portEnv(teq, { kbm: false, rawViews: true }).VICTORY_KBM_NATIVE, '0');
   assert.equal(customPort({ repo: 'https://github.com/a/b', commit: 'x' }).pinned, null, 'sans commit : le dernier publié');
 });
 
@@ -57,7 +60,7 @@ test('API : choisir un portage, ses options, un dépôt au choix', async () => {
   };
   try {
     let st = await call('/api/state');
-    assert.deepEqual(st.ports.map((p) => p.id), ['victory', 'belobug-amd', 'custom']);
+    assert.deepEqual(st.ports.map((p) => p.id), ['victory', 'belobug-amd', 'tequesta', 'custom']);
     assert.equal(st.victory.name, 'VIctory');
     assert.ok(!JSON.stringify(st.ports).includes('VICTORY_'), 'les variables ne vont pas à l\'interface');
 

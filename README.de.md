@@ -25,7 +25,7 @@ SixM ist ein spielunabhängiges Mehrspieler- und Modding-Framework im Geist von 
 | | |
 |---|---|
 | **Spielen** | Spiel und Server wählen, dann starten. Favoriten, Chat, Spieler, Radar. Der Demomodus braucht kein Spiel. |
-| **VIctory** | Lädt VIctory oder einen Fork wie VIctory Belobug AMD herunter und kompiliert ihn auf deinem PC, in einer festen Version und mit Live-Protokoll. Aktualisiert wird immer von Hand. |
+| **VIctory** | Lädt VIctory oder einen Fork wie VIctory Belobug AMD oder Tequesta herunter und kompiliert ihn auf deinem PC, in einer festen Version und mit Live-Protokoll. Aktualisiert wird immer von Hand. |
 | **Overlay im Spiel** | Chat, Spieler, Radar und Mod-Menüs über dem Spielfenster. F7 Menü, F8 zum Schreiben, F9 zum Ausblenden. Nur Windows. |
 | **Andere Spieler** | Ihre Namen erscheinen an ihrer Position in der Welt, über das SixM-Modul für VIctory. Benötigt ein lokales Profil. |
 | **Hosten** | Dein Server in zwei Klicks: öffentlich oder privat, Whitelist, Admins, Passwort, Sperren, Konsole. |

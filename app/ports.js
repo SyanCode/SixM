@@ -56,6 +56,32 @@ export const PORTS = [
       },
     ],
   },
+  {
+    id: 'tequesta', name: 'Tequesta', author: '0v3rr',
+    repo: 'https://github.com/0v3rr/Tequesta.git', pinned: '5b04aa0341de9f922f4434d93b3d60747a749392',
+    url: 'https://github.com/0v3rr/Tequesta',
+    description: 'Couche de compatibilité dérivée de VIctory, optimisée pour les cartes NVIDIA RTX : clavier et souris natifs (AZERTY et QWERTY), menu de réglages F1 dans le jeu, cache des shaders. Jouable dans le prologue, quelques images par seconde pour l\'instant.',
+    tags: ['NVIDIA RTX', 'Clavier et souris'],
+    // Réglages recommandés pour les cartes NVIDIA RTX (README du dépôt).
+    env: { VICTORY_THIN: '1', VICTORY_JOIN_PARTS: '8', VICTORY_CARD_REHASH_RUNS: '1' },
+    options: [
+      {
+        id: 'kbm', type: 'bool', label: 'Clavier et souris natifs', default: true,
+        description: 'Souris brute à 125 Hz et touches selon leur position (AZERTY comme QWERTY). F2 capture ou libère la souris.',
+        on: { VICTORY_KBM_NATIVE: '1' }, off: { VICTORY_KBM_NATIVE: '0' },
+      },
+      {
+        id: 'staticCache', type: 'bool', label: 'Cache des dessins statiques', default: true,
+        description: 'Mémorise la géométrie qui ne bouge pas : environ 40 % d\'images en plus en intérieur.',
+        on: { VICTORY_PORT_STATIC: '1' }, off: { VICTORY_PORT_STATIC: '0' },
+      },
+      {
+        id: 'rawViews', type: 'bool', label: 'Vues GPU directes', default: false,
+        description: 'À laisser désactivé sur les cartes NVIDIA : SixM garde alors la sous-allocation par blocs de 4 Mio.',
+        on: { VICTORY_RAW_VIEWS: '1' }, off: { VICTORY_RAW_VIEWS: '0' },
+      },
+    ],
+  },
 ];
 
 /** Dépôt GitHub public, adresse https. */
