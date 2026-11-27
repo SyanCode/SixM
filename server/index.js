@@ -13,6 +13,7 @@ import { MenuHub, cleanNotice, cleanWorld } from './menus.js';
 const WORLD_SECONDS_PER_MINUTE = 2;
 import { loadConfig, normalizeConfig } from './config.js';
 import { startConsole } from './console.js';
+import { UID } from './identity.js';
 
 export async function createServer(rawConfig) {
   const config = normalizeConfig(rawConfig);
@@ -117,6 +118,11 @@ export async function hostDirectory(dir) {
   const srv = await createServer(config).catch((e) => {
     throw e.code === 'EADDRINUSE' ? new Error(`le port ${config.port} est déjà utilisé`) : e;
   });
+  // SIXM_ADMINS : administrateurs donnés par l'hébergeur, sans console ni application.
+  for (const uid of (process.env.SIXM_ADMINS ?? '').split(/[\s,;]+/).filter(Boolean)) {
+    if (!UID.test(uid)) { console.error(`[sixm] SIXM_ADMINS : identifiant ignoré, ${uid.slice(0, 40)}`); continue; }
+    if (!srv.access.isAdmin(uid)) srv.access.setAdmin(uid, '', true);
+  }
   let stopping = false;
   srv.shutdown = async () => {
     if (stopping) return;

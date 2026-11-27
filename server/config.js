@@ -56,10 +56,41 @@ export function normalizeConfig(raw) {
 }
 
 /**
- * Charge `<dir>/server.json`. Les chemins sont relatifs à ce dossier.
- * SIXM_PORT et SIXM_PASSWORD priment sur le fichier (Docker, CI).
+ * Variables d'environnement qui priment sur server.json, pour un serveur hébergé sans interface
+ * (Docker, CI, plateforme comme Mas) :
+ *   SIXM_PORT, SIXM_HOST ; à défaut PORT et HOST donnés par la plateforme
+ *   SIXM_NAME, SIXM_DESCRIPTION, SIXM_MOTD, SIXM_PASSWORD, SIXM_MAX_PLAYERS
+ *   SIXM_VISIBILITY (public | private), SIXM_WHITELIST (1 | 0)
+ *   SIXM_TRUST_PROXY=1 : derrière un reverse proxy (nginx), l'adresse des joueurs vient de X-Forwarded-For
+ *   SIXM_DATA_DIR : dossier gardé d'un déploiement à l'autre, pour bans.json et access.json
+ *   SIXM_ADMINS : identifiants de joueurs (sixm:…) administrateurs, séparés par des virgules (voir hostDirectory)
  */
-export function loadConfig(dir) {
+export function envOverrides(env = process.env) {
+  const raw = {};
+  const set = (name, key, conv = (v) => v) => { if (env[name] !== undefined && env[name] !== '') raw[key] = conv(env[name]); };
+  const flag = (v) => ['1', 'true', 'yes', 'oui'].includes(v.trim().toLowerCase());
+  if (env.SIXM_PORT === undefined && env.PORT) {
+    raw.port = Number(env.PORT);
+    if (env.HOST) raw.host = env.HOST;
+  }
+  set('SIXM_PORT', 'port', Number);
+  set('SIXM_HOST', 'host');
+  set('SIXM_NAME', 'name');
+  set('SIXM_DESCRIPTION', 'description');
+  set('SIXM_MOTD', 'motd');
+  if (env.SIXM_PASSWORD !== undefined) raw.password = env.SIXM_PASSWORD;
+  set('SIXM_MAX_PLAYERS', 'maxPlayers', Number);
+  set('SIXM_VISIBILITY', 'visibility', (v) => v.trim());
+  set('SIXM_WHITELIST', 'whitelist', flag);
+  set('SIXM_TRUST_PROXY', 'trustProxy', flag);
+  return raw;
+}
+
+/**
+ * Charge `<dir>/server.json`. Les chemins sont relatifs à ce dossier ; les variables d'environnement
+ * d'`envOverrides` priment sur le fichier.
+ */
+export function loadConfig(dir, env = process.env) {
   const file = path.join(dir, 'server.json');
   let raw;
   try {
@@ -67,11 +98,17 @@ export function loadConfig(dir) {
   } catch (e) {
     throw new Error(`impossible de lire ${file} : ${e.message}`);
   }
-  if (process.env.SIXM_PORT !== undefined) raw.port = Number(process.env.SIXM_PORT);
-  if (process.env.SIXM_PASSWORD !== undefined) raw.password = process.env.SIXM_PASSWORD;
-  const config = normalizeConfig(raw);
+  const config = normalizeConfig({ ...raw, ...envOverrides(env) });
   config.resourcesDir = path.resolve(dir, config.resourcesDir);
-  config.bansFile = path.resolve(dir, config.bansFile ?? 'bans.json');
-  config.accessFile = path.resolve(dir, config.accessFile ?? 'access.json');
+  if (env.SIXM_DATA_DIR) {
+    // Le dossier du serveur est remplacé à chaque déploiement : bannissements et accès vont ailleurs.
+    const data = path.resolve(env.SIXM_DATA_DIR);
+    fs.mkdirSync(data, { recursive: true });
+    config.bansFile = path.join(data, path.basename(config.bansFile ?? 'bans.json'));
+    config.accessFile = path.join(data, path.basename(config.accessFile ?? 'access.json'));
+  } else {
+    config.bansFile = path.resolve(dir, config.bansFile ?? 'bans.json');
+    config.accessFile = path.resolve(dir, config.accessFile ?? 'access.json');
+  }
   return config;
 }

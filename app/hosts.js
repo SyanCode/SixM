@@ -81,9 +81,9 @@ export class Hosts {
     if (['starting', 'running'].includes(this.running.get(id)?.status)) throw new Error('déjà démarré');
     loadConfig(dir);
     // SIXM_PARENT : le serveur s'arrête tout seul si l'application disparaît.
-    const env = { ...process.env, SIXM_PARENT: '1' };
-    delete env.SIXM_PORT;
-    delete env.SIXM_PASSWORD;
+    // Les variables d'hébergement (SIXM_…, PORT, HOST : voir server/config.js) ne viennent que de server.json ici.
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(SIXM_|PORT$|HOST$)/i.test(k)));
+    env.SIXM_PARENT = '1';
     const child = spawn(process.execPath, [CLI, 'start', dir], { env, windowsHide: true });
     const run = { process: child, status: 'starting', log: [], stale: false, players: [] };
     this.running.set(id, run);
