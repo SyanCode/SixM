@@ -10,7 +10,7 @@ import { cleanOptions, customPort, isRepo, portEnv, PORTS } from '../app/ports.j
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'sixm-'));
 
 test('catalogue : ids uniques, commits épinglés, dépôts GitHub', () => {
-  assert.deepEqual(PORTS.map((p) => p.id), ['victory', 'belobug-amd', 'tequesta']);
+  assert.deepEqual(PORTS.map((p) => p.id), ['victory', 'belobug-amd', 'tequesta', 'victory-nvidia']);
   for (const p of PORTS) {
     assert.match(p.pinned, /^[0-9a-f]{40}$/, p.id);
     assert.ok(isRepo(p.repo), p.repo);
@@ -33,6 +33,13 @@ test('options de lancement : variables d\'environnement du portage', () => {
   const teq = PORTS.find((p) => p.id === 'tequesta');
   assert.deepEqual(portEnv(teq, {}), { VICTORY_THIN: '1', VICTORY_JOIN_PARTS: '8', VICTORY_CARD_REHASH_RUNS: '1', VICTORY_KBM_NATIVE: '1', VICTORY_PORT_STATIC: '1', VICTORY_RAW_VIEWS: '0' }, 'profil NVIDIA recommandé');
   assert.equal(portEnv(teq, { kbm: false, rawViews: true }).VICTORY_KBM_NATIVE, '0');
+  const nv = PORTS.find((p) => p.id === 'victory-nvidia');
+  const nvBase = portEnv(nv, {});
+  assert.deepEqual([nvBase.VICTORY_RELAY, nvBase.VICTORY_SOFT_VIEWS, nvBase.VICTORY_NATIVE_1440P, nvBase.VICTORY_DLSS, nvBase.VICTORY_DLSS_MODE], ['2', 'copies', '1', '1', 'quality'], 'réglages du fork');
+  assert.deepEqual([nvBase.VICTORY_FRAMEGEN, nvBase.VICTORY_FRAMEGEN_X, nvBase.VICTORY_FSR_FRAMEGEN, nvBase.VICTORY_FRAME_INTERVAL_US], ['1', '0', '1', '1000'], 'génération d\'images prête, sans limite');
+  const nvOff = portEnv(nv, { dlss: false, frameGen: false, native1440p: false, fps: '', streamline: 'D:\\SL', dlssMode: 'ultra' });
+  assert.deepEqual([nvOff.VICTORY_DLSS, nvOff.VICTORY_FRAMEGEN, nvOff.VICTORY_NATIVE_1440P, nvOff.VICTORY_FRAME_INTERVAL_US], [undefined, undefined, undefined, undefined]);
+  assert.deepEqual([nvOff.VICTORY_STREAMLINE_DIR, nvOff.VICTORY_DLSS_MODE], ['D:\\SL', 'quality']);
   assert.equal(customPort({ repo: 'https://github.com/a/b', commit: 'x' }).pinned, null, 'sans commit : le dernier publié');
 });
 
@@ -60,7 +67,7 @@ test('API : choisir un portage, ses options, un dépôt au choix', async () => {
   };
   try {
     let st = await call('/api/state');
-    assert.deepEqual(st.ports.map((p) => p.id), ['victory', 'belobug-amd', 'tequesta', 'custom']);
+    assert.deepEqual(st.ports.map((p) => p.id), ['victory', 'belobug-amd', 'tequesta', 'victory-nvidia', 'custom']);
     assert.equal(st.victory.name, 'VIctory');
     assert.ok(!JSON.stringify(st.ports).includes('VICTORY_'), 'les variables ne vont pas à l\'interface');
 

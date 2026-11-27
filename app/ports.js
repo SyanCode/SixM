@@ -1,4 +1,8 @@
+import path from 'node:path';
 import { PINNED, REPO } from './builder.js';
+
+/** Où `victory get-dlss` de VIctory-NVIDIA range les fichiers DLSS de NVIDIA. */
+const STREAMLINE_HOME = process.env.LOCALAPPDATA ? path.win32.join(process.env.LOCALAPPDATA, 'victory', 'nvidia-sdk', 'Streamline', 'bin', 'x64') : '';
 
 /**
  * Projets de portage que SixM sait installer : même structure que VIctory (apps/victory, GPL-3),
@@ -79,6 +83,63 @@ export const PORTS = [
         id: 'rawViews', type: 'bool', label: 'Vues GPU directes', default: false,
         description: 'À laisser désactivé sur les cartes NVIDIA : SixM garde alors la sous-allocation par blocs de 4 Mio.',
         on: { VICTORY_RAW_VIEWS: '1' }, off: { VICTORY_RAW_VIEWS: '0' },
+      },
+    ],
+  },
+  {
+    id: 'victory-nvidia', name: 'VIctory-NVIDIA', author: 'trustno1-coder',
+    repo: 'https://github.com/trustno1-coder/VIctory-NVIDIA.git', pinned: '29d8dbf7d9892ceb8bec378a9dbc3c4f2931b745',
+    url: 'https://github.com/trustno1-coder/VIctory-NVIDIA',
+    description: 'Fork de VIctory optimisé pour les cartes NVIDIA GeForce RTX : DLSS, génération d\'images DLSS (RTX 40 et 50) ou FSR 3, menu de réglages F1, statistiques F3. Les fichiers DLSS de NVIDIA ne sont pas fournis. 32 Go de RAM conseillés.',
+    tags: ['NVIDIA RTX', 'DLSS'],
+    // Réglages avec lesquels le fork est joué (apps/victory/src/play.rs et scripts/play-foxhound.ps1 du dépôt).
+    env: {
+      VICTORY_THIN: '1', VICTORY_JOIN_PARTS: '8', VICTORY_RELAY: '2', VICTORY_RELAY_COPY: '1', VICTORY_WIDE_BACK: '1',
+      VICTORY_CARD_REHASH_RUNS: '1', VICTORY_JOIN_COPIES: '1', VICTORY_CARD_STEPS: '2', VICTORY_CARD_AWAKE: '1',
+      VICTORY_CARD_BUFFERS_MIN_KB: '64', VICTORY_INDIRECT_WINDOW: '1', VICTORY_INDIRECT_BATCH: '2', VICTORY_UPLOAD_AHEAD: '1',
+      VICTORY_SHOW_AFTER: '1', VICTORY_MAP_THREADS: '1', VICTORY_WC_NO_BACK: '1', VICTORY_WC_NO_BACK_MIN_KB: '1024',
+      VICTORY_SOFT_VIEWS: 'copies', VICTORY_TEXTURE_POOL: '1', VICTORY_RIPE_BLOCKS: '0', VICTORY_TEXTURE_NO_WAIT: '1',
+      VICTORY_TEXTURE_CATCHUP: '0', VICTORY_TEXTURE_STAGE_MS: '16', VICTORY_LEVELS_ON_DEMAND: '0', VICTORY_PRELUDE_UPLOADS: '1',
+      VICTORY_SHOW_NEW_LATER: '1', VICTORY_POOL_SMALL: '0', VICTORY_TABLED_REREAD: '1', VICTORY_QUEUE_HOST_TEXTURES: '0',
+      VICTORY_HEAP_SYNC_FIRST: '1', VICTORY_SYNC_IN_PLACE: '1', VICTORY_SPANS_QUICK: '1', VICTORY_SYNC_FINE: '1',
+      VICTORY_HEAP_SYNC_AT_SUBMIT: '1', VICTORY_AMBIENT: '0.8', VICTORY_AMBIENT_AIR: '1.5', VICTORY_AMBIENT_SPECULAR: '1',
+      VICTORY_EARLY_DEPTH: '1', VICTORY_LEAVE_OUT: '02384a60fda6f2d0,731a39171b568298', VICTORY_PIPELINE_BOOK: '1',
+      // Sans dossier choisi : là où `victory get-dlss` les range.
+      ...(STREAMLINE_HOME && { VICTORY_STREAMLINE_DIR: STREAMLINE_HOME }),
+    },
+    options: [
+      {
+        id: 'native1440p', type: 'bool', label: 'Image en 2560×1440', default: true,
+        description: 'Profil Series X : image et scène en 1440p. Désactivé, la sortie d\'origine en 3840×2160. À désactiver avec le profil Series S.',
+        on: { VICTORY_NATIVE_1440P: '1' },
+      },
+      {
+        id: 'dlss', type: 'bool', label: 'DLSS', default: true,
+        description: 'Remplace la mise à l\'échelle du jeu. Sans les fichiers de NVIDIA, le jeu tourne sans, et l\'indique au démarrage.',
+        on: { VICTORY_DLSS: '1' },
+      },
+      {
+        id: 'dlssMode', type: 'choice', label: 'Mode DLSS', env: 'VICTORY_DLSS_MODE', default: 'quality',
+        choices: [['dlaa', 'DLAA'], ['quality', 'Qualité'], ['balanced', 'Équilibré'], ['performance', 'Performance']],
+        description: 'Utilisé seulement quand le DLSS est activé.',
+      },
+      {
+        id: 'frameGen', type: 'bool', label: 'Génération d\'images', default: true,
+        description: 'Prête mais éteinte au départ : le menu F1 l\'allume. DLSS sur RTX 40 et 50, sinon FSR 3 (2× au plus, DLL d\'AMD à fournir).',
+        on: { VICTORY_FRAMEGEN: '1', VICTORY_FSR_FRAMEGEN: '1', VICTORY_FRAMEGEN_X: '0', VICTORY_TEXTURE_ROOM_PERCENT: '86' },
+      },
+      {
+        id: 'fps', type: 'choice', label: 'Limite d\'images/s', env: 'VICTORY_FRAME_INTERVAL_US', default: '1000',
+        choices: [['1000', 'Aucune'], ['8333', '120'], ['16667', '60'], ['', '30 (celle du jeu)']],
+        description: 'Le fork joue sans limite.',
+      },
+      {
+        id: 'streamline', type: 'path', label: 'Dossier DLSS de NVIDIA', env: 'VICTORY_STREAMLINE_DIR', default: '', folder: true,
+        description: 'Le dossier qui contient sl.interposer.dll (NVIDIA Streamline). Vide : celui où « victory get-dlss » les télécharge depuis le GitHub de NVIDIA, %LOCALAPPDATA%\\victory\\nvidia-sdk.',
+      },
+      {
+        id: 'fidelityfx', type: 'path', label: 'Dossier FidelityFX', env: 'VICTORY_FIDELITYFX_DIR', default: '', folder: true,
+        description: 'Pour FSR 3 : le dossier qui contient amd_fidelityfx_loader_dx12.dll et amd_fidelityfx_framegeneration_dx12.dll.',
       },
     ],
   },
