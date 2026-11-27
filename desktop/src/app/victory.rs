@@ -146,6 +146,15 @@ impl SixmApp {
                         if theme::button(ui, Kind::Normal, ic::ARROWS_CLOCKWISE, "Mettre à jour").clicked() {
                             self.victory_update();
                         }
+                        if !v.module_stale && theme::button_if(ui, Kind::Normal, ic::HAMMER, "Recompiler", ready != Some(false)).clicked() {
+                            let name = self.port_name();
+                            self.confirm(
+                                &format!("Recompiler {name} ?"),
+                                "La même version est recompilée entièrement depuis son code, ce qui prend plusieurs minutes. La version actuelle reste en place si la compilation échoue.",
+                                "Recompiler",
+                                Box::new(|app: &mut SixmApp| app.post("/api/victory/rebuild", json!({ "force": true }))),
+                            );
+                        }
                     } else if theme::button_if(ui, Kind::Primary, ic::DOWNLOAD_SIMPLE, if again { "Réessayer" } else { "Installer" }, ready == Some(true)).clicked() {
                         self.post("/api/victory/install", json!({}));
                     }

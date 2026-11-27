@@ -358,6 +358,14 @@ function victoryPanel({ onLater } = {}) {
     if (ok) await post('/api/victory/update');
   });
 
+  const rebuild = async () => {
+    const ok = await ask('Recompiler ?', () => ({
+      body: [h('p', { class: 'muted' }, 'La même version est recompilée entièrement depuis son code, ce qui prend plusieurs minutes. La version actuelle reste en place si la compilation échoue.')],
+      submit: 'Recompiler', value: () => true,
+    }));
+    if (ok) act(() => post('/api/victory/rebuild', { force: true }));
+  };
+
   let shape = null;
   return {
     el,
@@ -382,6 +390,7 @@ function victoryPanel({ onLater } = {}) {
         const again = ['failed', 'cancelled'].includes(v.status) && ['install', 'update', 'rebuild'].includes(v.task);
         actions.replaceChildren(
           ...(v.installed && v.moduleStale ? [btn('Recompiler', () => act(() => post('/api/victory/rebuild')), 'primary', { disabled: ready === false })] : []),
+          ...(v.installed && !v.moduleStale ? [btn('Recompiler', rebuild, '', { disabled: ready === false })] : []),
           ...(v.installed ? [btn('Mettre à jour', update)] : [btn(again ? 'Réessayer' : 'Installer VIctory', () => act(() => post('/api/victory/install')), 'primary', { disabled: !ready })]),
           btn('Revérifier', () => act(() => post('/api/victory/check')), 'quiet'),
           ...(onLater ? [btn('Plus tard', onLater, 'quiet')] : []));

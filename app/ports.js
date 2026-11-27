@@ -1,8 +1,4 @@
-import path from 'node:path';
 import { PINNED, REPO } from './builder.js';
-
-/** Où `victory get-dlss` de VIctory-NVIDIA range les fichiers DLSS de NVIDIA. */
-const STREAMLINE_HOME = process.env.LOCALAPPDATA ? path.win32.join(process.env.LOCALAPPDATA, 'victory', 'nvidia-sdk', 'Streamline', 'bin', 'x64') : '';
 
 /**
  * Projets de portage que SixM sait installer : même structure que VIctory (apps/victory, GPL-3),
@@ -11,7 +7,9 @@ const STREAMLINE_HOME = process.env.LOCALAPPDATA ? path.win32.join(process.env.L
  * Chaque option de lancement devient des variables d'environnement pour le programme du portage.
  *   bool   : `on` quand activée, `off` sinon
  *   choice : la valeur choisie dans `env` (rien si vide)
- *   path   : le chemin dans `env` (rien si vide)
+ *   path   : le chemin dans `env` ; vide, celui que SixM a trouvé seul si l'option a `find`
+ *            ({ kind, file } : voir sdks.js), sinon rien
+ * fetch : bibliothèques que le portage sait télécharger lui-même (arguments de son victory.exe).
  */
 export const PORTS = [
   {
@@ -56,7 +54,8 @@ export const PORTS = [
       },
       {
         id: 'fidelityfx', type: 'path', label: 'Dossier FidelityFX', env: 'VICTORY_FIDELITYFX_DIR', default: '', folder: true,
-        description: 'Le dossier qui contient amd_fidelityfx_upscaler_dx12.dll (AMD FSR SDK 2.4.0, Kits/FidelityFX/signedbin).',
+        description: 'Le dossier qui contient amd_fidelityfx_upscaler_dx12.dll (AMD FSR SDK 2.4.0, Kits/FidelityFX/signedbin). Vide : SixM le cherche seul.',
+        find: { kind: 'fidelityfx', file: 'amd_fidelityfx_upscaler_dx12.dll' },
       },
     ],
   },
@@ -92,6 +91,8 @@ export const PORTS = [
     url: 'https://github.com/trustno1-coder/VIctory-NVIDIA',
     description: 'Fork de VIctory optimisé pour les cartes NVIDIA GeForce RTX : DLSS, génération d\'images DLSS (RTX 40 et 50) ou FSR 3, menu de réglages F1, statistiques F3. Les fichiers DLSS de NVIDIA ne sont pas fournis. 32 Go de RAM conseillés.',
     tags: ['NVIDIA RTX', 'DLSS'],
+    // `victory get-dlss` : les fichiers de NVIDIA, depuis le GitHub de NVIDIA, dans %LOCALAPPDATA%\victory\nvidia-sdk.
+    fetch: { streamline: ['get-dlss'] },
     // Réglages avec lesquels le fork est joué (apps/victory/src/play.rs et scripts/play-foxhound.ps1 du dépôt).
     env: {
       VICTORY_THIN: '1', VICTORY_JOIN_PARTS: '8', VICTORY_RELAY: '2', VICTORY_RELAY_COPY: '1', VICTORY_WIDE_BACK: '1',
@@ -104,8 +105,6 @@ export const PORTS = [
       VICTORY_HEAP_SYNC_FIRST: '1', VICTORY_SYNC_IN_PLACE: '1', VICTORY_SPANS_QUICK: '1', VICTORY_SYNC_FINE: '1',
       VICTORY_HEAP_SYNC_AT_SUBMIT: '1', VICTORY_AMBIENT: '0.8', VICTORY_AMBIENT_AIR: '1.5', VICTORY_AMBIENT_SPECULAR: '1',
       VICTORY_EARLY_DEPTH: '1', VICTORY_LEAVE_OUT: '02384a60fda6f2d0,731a39171b568298', VICTORY_PIPELINE_BOOK: '1',
-      // Sans dossier choisi : là où `victory get-dlss` les range.
-      ...(STREAMLINE_HOME && { VICTORY_STREAMLINE_DIR: STREAMLINE_HOME }),
     },
     options: [
       {
@@ -135,11 +134,13 @@ export const PORTS = [
       },
       {
         id: 'streamline', type: 'path', label: 'Dossier DLSS de NVIDIA', env: 'VICTORY_STREAMLINE_DIR', default: '', folder: true,
-        description: 'Le dossier qui contient sl.interposer.dll (NVIDIA Streamline). Vide : celui où « victory get-dlss » les télécharge depuis le GitHub de NVIDIA, %LOCALAPPDATA%\\victory\\nvidia-sdk.',
+        description: 'Le dossier qui contient sl.interposer.dll (NVIDIA Streamline). Vide : SixM le cherche seul.',
+        find: { kind: 'streamline', file: 'sl.interposer.dll' },
       },
       {
         id: 'fidelityfx', type: 'path', label: 'Dossier FidelityFX', env: 'VICTORY_FIDELITYFX_DIR', default: '', folder: true,
-        description: 'Pour FSR 3 : le dossier qui contient amd_fidelityfx_loader_dx12.dll et amd_fidelityfx_framegeneration_dx12.dll.',
+        description: 'Pour FSR 3 : le dossier qui contient amd_fidelityfx_loader_dx12.dll et amd_fidelityfx_framegeneration_dx12.dll. Vide : SixM le cherche seul.',
+        find: { kind: 'fidelityfx', file: 'amd_fidelityfx_framegeneration_dx12.dll' },
       },
     ],
   },
@@ -169,13 +170,22 @@ export function cleanOptions(port, values = {}) {
   return out;
 }
 
-/** Variables d'environnement du lancement : réglages du portage, puis options choisies. */
-export function portEnv(port, values = {}) {
+/**
+ * Variables d'environnement du lancement : réglages du portage, puis options choisies.
+ * found : dossiers trouvés par SixM, par option (`findOptions`), pour les chemins laissés vides.
+ */
+export function portEnv(port, values = {}, found = {}) {
   const v = cleanOptions(port, values);
   const env = { ...port.env };
   for (const o of port.options) {
     if (o.type === 'bool') Object.assign(env, v[o.id] ? o.on ?? {} : o.off ?? {});
     else if (v[o.id]) env[o.env] = v[o.id];
+    else if (o.type === 'path' && found[o.id]) env[o.env] = found[o.id];
   }
   return env;
+}
+
+/** Dossiers trouvés pour les options `find` d'un portage : { id: chemin ou null }. */
+export function findOptions(port, ctx, find) {
+  return Object.fromEntries(port.options.filter((o) => o.find).map((o) => [o.id, find(o.find.kind, ctx, o.find.file)]));
 }

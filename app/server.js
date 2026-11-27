@@ -8,7 +8,8 @@ import { linkSupported, pickPath, startLink } from '../client/link.js';
 import { isExe, VictoryBuilder } from './builder.js';
 import { Hosts, lanAddress } from './hosts.js';
 import { Discovery, fetchDirectories } from './discovery.js';
-import { cleanOptions, customPort, isRepo, portEnv, PORTS } from './ports.js';
+import { cleanOptions, customPort, findOptions, isRepo, portEnv, PORTS } from './ports.js';
+import { findSdk, searchRoots } from './sdks.js';
 import { findVictory, Launcher, resolveGame } from './launcher.js';
 import { Session } from './session.js';
 import { Settings } from './settings.js';
@@ -40,7 +41,7 @@ class HttpError extends Error {
  * fichiers : chaque appel exige le jeton de la session et un en-tête Host exact, pour qu'aucun site
  * web ouvert dans le navigateur ne puisse la piloter (CSRF, DNS rebinding).
  */
-export async function createApp({ dataDir, port = 0, adapterOptions, builderOptions = {}, updaterOptions = {}, autoUpdate = false, onRestart = () => {}, onQuit = () => {} }) {
+export async function createApp({ dataDir, port = 0, adapterOptions, builderOptions = {}, updaterOptions = {}, sdkFinder = findSdk, sdkRoots = searchRoots(), autoUpdate = false, onRestart = () => {}, onQuit = () => {} }) {
   const token = crypto.randomBytes(24).toString('base64url');
   const settings = new Settings(dataDir);
   const hosts = new Hosts(path.join(dataDir, 'servers'));
@@ -76,7 +77,18 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
     fn(current());
   };
   const victoryValid = () => isExe(settings.value.victory);
-  const launchEnv = () => portEnv(portOf(settings.value.port), settings.value.portOptions[settings.value.port]);
+  /** Dossiers DLSS et FidelityFX trouvés pour un portage ; relus au plus toutes les 20 s pour l'interface. */
+  const foundCache = new Map();
+  const found = (id, fresh = false) => {
+    const port = portOf(id), hit = foundCache.get(port.id);
+    if (!fresh && hit && Date.now() - hit.at < 20000) return hit.value;
+    const b = port.custom && !isRepo(port.repo) ? null : builder(port.id), exe = b?.installed()?.exe;
+    const ctx = { exeDir: exe ? path.dirname(exe) : null, src: b?.src ?? null, localAppData: process.env.LOCALAPPDATA ?? null, roots: sdkRoots };
+    const value = findOptions(port, ctx, sdkFinder);
+    foundCache.set(port.id, { at: Date.now(), value });
+    return value;
+  };
+  const launchEnv = () => portEnv(portOf(settings.value.port), settings.value.portOptions[settings.value.port], found(settings.value.port, true));
   const victory = current();
   if (!victoryValid() && victory.supported) {
     const known = victory.installed();
@@ -143,7 +155,8 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
         const b = p.custom && !isRepo(p.repo) ? null : builder(p.id);
         return {
           id: p.id, name: p.name, author: p.author, url: p.url, repo: p.repo, description: p.description, tags: p.tags, custom: !!p.custom,
-          pinned: p.pinned, options: p.options.map(({ on, off, env, ...o }) => o), values: cleanOptions(p, settings.value.portOptions[p.id]),
+          pinned: p.pinned, options: p.options.map(({ on, off, env, find, ...o }) => o), values: cleanOptions(p, settings.value.portOptions[p.id]),
+          found: found(p.id), fetch: Object.keys(p.fetch ?? {}),
           installed: b?.installed() ?? null, status: b?.status ?? 'idle',
         };
       }),
@@ -189,7 +202,16 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
       if (!quiet()) throw new Error('quittez la partie et arrêtez vos serveurs d\'abord');
       updater.apply();
     },
-    'POST /api/victory/rebuild': () => startBuild((b) => b.rebuild()),
+    'POST /api/victory/rebuild': ({ force }) => {
+      if (force && launcher.pid) throw new Error('arrêtez d\'abord le jeu : son programme va être remplacé');
+      startBuild((b) => b.rebuild({ force: force === true }));
+    },
+    /** Le portage télécharge lui-même une bibliothèque (ex. DLSS depuis le GitHub de NVIDIA). */
+    'POST /api/ports/fetch': ({ kind }) => {
+      const args = portOf(settings.value.port).fetch?.[kind];
+      if (!Array.isArray(args)) throw new Error('ce portage ne sait pas télécharger cela');
+      startBuild((b) => b.fetch(args, kind === 'streamline' ? 'Téléchargement des fichiers DLSS de NVIDIA' : 'Téléchargement'));
+    },
     'POST /api/profiles': () => { fs.mkdirSync(launcher.profiles, { recursive: true }); return openExternal(launcher.profiles); },
     'POST /api/game/launch': async () => {
       const game = selectedGame();

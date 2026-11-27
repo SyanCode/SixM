@@ -37,6 +37,10 @@ pub struct Port {
     pub pinned: Option<String>,
     pub options: Vec<PortOption>,
     pub values: serde_json::Map<String, Value>,
+    /// Dossiers trouvés par SixM pour les chemins laissés vides : id de l'option -> chemin ou null.
+    pub found: serde_json::Map<String, Value>,
+    /// Bibliothèques que le portage sait télécharger lui-même (id de l'option).
+    pub fetch: Vec<String>,
     pub installed: Option<Installed>,
     pub status: String,
 }

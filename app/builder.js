@@ -181,11 +181,24 @@ export class VictoryBuilder {
   /** Le module SixM a changé depuis la compilation. */
   moduleStale(installed = this.installed()) { return !!installed && installed.module !== this.module.id; }
 
-  /** Recompile la même version de VIctory avec le module SixM actuel. */
-  rebuild() {
+  /**
+   * Recompile la même version avec le module SixM actuel. force : tout recompiler depuis le code,
+   * même si cette version est déjà compilée (après un échec, pour déboguer, après une mise à jour de Rust).
+   */
+  rebuild({ force = false } = {}) {
     const installed = this.installed();
     if (!installed) throw new Error(`${this.name} n'est pas installé`);
-    return this.#run('rebuild', () => this.#build(async () => installed.commit));
+    return this.#run('rebuild', () => this.#build(async () => installed.commit, { force }));
+  }
+
+  /** Lance le victory.exe installé avec `args` (le portage télécharge lui-même ce qu'il lui faut), journal en direct. */
+  fetch(args, step = 'Téléchargement') {
+    const installed = this.installed();
+    if (!installed) throw new Error(`${this.name} n'est pas installé`);
+    return this.#run('fetch', async () => {
+      this.#progress(step, null);
+      await this.#exec([installed.exe], args, { cwd: path.dirname(installed.exe) });
+    });
   }
 
   /** Recompilation automatique : un seul essai par version du module, même raté ou annulé. */
@@ -247,7 +260,7 @@ export class VictoryBuilder {
     return this.running;
   }
 
-  async #build(target) {
+  async #build(target, { force = false } = {}) {
     this.#progress('Vérification des prérequis', null);
     const missing = (await this.check()).filter((c) => !c.ok);
     if (missing.length) throw new Error(`il manque : ${missing.map((c) => c.name).join(', ')}`);
@@ -255,7 +268,11 @@ export class VictoryBuilder {
     const commit = await target();
     this.#alive();
     const done = path.join(this.dir, 'builds', `${commit.slice(0, 12)}-${this.module.id.slice(0, 6)}`, 'victory.exe');
-    if (!isExe(done)) {
+    if (force || !isExe(done)) {
+      if (force) {
+        this.#line('Recompilation complète : les fichiers déjà compilés sont effacés.');
+        fs.rmSync(path.join(this.dir, 'target'), { recursive: true, force: true });
+      }
       await this.#checkout(commit);
       await this.#integrate();
       await this.#compile(done);

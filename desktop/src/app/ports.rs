@@ -126,6 +126,7 @@ impl SixmApp {
             self.port_form = Some((port.id.clone(), port.values.clone()));
         }
         let mut save = false;
+        let mut fetch: Option<String> = None;
         theme::card().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(theme::title("Options de lancement", 16.0));
@@ -163,10 +164,13 @@ impl SixmApp {
                     }
                     "path" => {
                         let mut text = values.get(&o.id).and_then(Value::as_str).unwrap_or("").to_string();
+                        // None : pas de recherche pour cette option ; Some(None) : cherché, introuvable.
+                        let found = port.found.get(&o.id).map(|v| v.as_str().map(str::to_string));
                         theme::field(ui, &o.label, |ui| {
                             ui.horizontal(|ui| {
                                 let w = ui.available_width() - if cfg!(windows) { 130.0 } else { 0.0 };
-                                ui.add_sized(vec2(w, 38.0), egui::TextEdit::singleline(&mut text).hint_text("C:\\…").margin(vec2(10.0, 0.0)).align(egui::Align2::LEFT_CENTER));
+                                let hint = found.clone().flatten().unwrap_or_else(|| "C:\\…".into());
+                                ui.add_sized(vec2(w, 38.0), egui::TextEdit::singleline(&mut text).hint_text(hint).margin(vec2(10.0, 0.0)).align(egui::Align2::LEFT_CENTER));
                                 #[cfg(windows)]
                                 if theme::button(ui, Kind::Normal, ic::FOLDER_OPEN, "Parcourir").clicked() {
                                     if let Some(p) = rfd::FileDialog::new().set_title(&o.label).pick_folder() {
@@ -175,6 +179,24 @@ impl SixmApp {
                                 }
                             });
                             ui.add(egui::Label::new(theme::muted(&o.description)).wrap());
+                            if text.trim().is_empty() {
+                                match &found {
+                                    Some(Some(dir)) => {
+                                        ui.add(egui::Label::new(RichText::new(format!("Trouvé automatiquement : {dir}")).color(GREEN).size(13.0)).wrap());
+                                    }
+                                    Some(None) => {
+                                        ui.add(egui::Label::new(RichText::new("Introuvable sur ce PC : le jeu se lancera sans.").color(theme::YELLOW).size(13.0)).wrap());
+                                        if port.fetch.contains(&o.id) {
+                                            if port.installed.is_none() {
+                                                ui.label(theme::muted(format!("Installez d'abord {} : il sait télécharger ces fichiers.", port.name)));
+                                            } else if theme::button(ui, Kind::Normal, ic::DOWNLOAD_SIMPLE, "Télécharger depuis NVIDIA").clicked() {
+                                                fetch = Some(o.id.clone());
+                                            }
+                                        }
+                                    }
+                                    None => {}
+                                }
+                            }
                         });
                         values.insert(o.id.clone(), json!(text));
                     }
@@ -190,6 +212,15 @@ impl SixmApp {
                 }
             });
         });
+        if let Some(kind) = fetch {
+            let text = "Les fichiers DLSS et génération d'images de NVIDIA (environ 70 Mo), depuis le GitHub de NVIDIA (NVIDIA-RTX/Streamline), par le programme du portage. Ils sont soumis aux licences de NVIDIA, enregistrées à côté d'eux.";
+            self.confirm(
+                "Télécharger les fichiers DLSS ?",
+                text,
+                "Télécharger",
+                Box::new(move |app: &mut SixmApp| app.act(move |api| api.post("/api/ports/fetch", json!({ "kind": kind })).map(|_| None))),
+            );
+        }
         if save {
             let (id, values): (String, Map<String, Value>) = self.port_form.clone().expect("formulaire");
             self.act(move |api| {
