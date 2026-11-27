@@ -304,3 +304,25 @@ test('module changé : recompilation de la même version, un seul essai automati
   assert.ok(b.installed().exe.includes('-ffffff'));
   assert.ok(b.installed().exe.startsWith(path.join(dir, 'builds')));
 });
+
+test('journal à copier : en-tête de diagnostic, journal complet, dossier personnel masqué', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sixm-'));
+  const b = new VictoryBuilder(dir, { name: 'Fork', repo: 'https://github.com/a/b.git', pinned: null, supported: false });
+  assert.match(b.report(), /Portage : Fork \(https:\/\/github\.com\/a\/b\.git\), commit dernier publié[\s\S]*\(journal vide\)/);
+  const lines = Array.from({ length: 1000 }, (_, i) => `ligne ${i}`);
+  fs.writeFileSync(b.logFile, `${lines.join('\n')}\nerror: ${path.join(os.homedir(), 'x', 'Cargo.toml')}\n`);
+  const text = b.report();
+  assert.match(text, /^SixM \d+\.\d+\.\d+, /);
+  assert.ok(text.includes('ligne 0\n') && text.includes('ligne 999\n'), 'tout le journal, pas seulement l\'écran');
+  assert.ok(!text.includes(os.homedir()) && text.includes(`error: ${path.join('~', 'x', 'Cargo.toml')}`));
+
+  const app = await createApp({ dataDir: dir, builderOptions: { supported: false } });
+  try {
+    const res = await fetch(`${app.origin}/api/victory/log`, { headers: { 'x-sixm-token': app.token } });
+    assert.match((await res.json()).text, /^SixM .*\nPortage : VIctory/);
+    assert.equal((await fetch(`${app.origin}/api/victory/log`)).status, 401, 'jeton exigé');
+  } finally {
+    await app.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

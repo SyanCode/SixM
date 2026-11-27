@@ -11,6 +11,8 @@ export const PINNED = '13f91caee25f2fdf2c062be5f7a27f058e51cbca';
 const MODULE = fileURLToPath(new URL('../integrations/victory/sixm-bridge', import.meta.url));
 const NEEDED_GB = 5; // mesuré : 0,4 Go de compilation, plus la version de Rust épinglée par VIctory
 const MAX_LOG = 400;
+const MAX_REPORT = 1 << 20; // journal copié : le dernier Mio
+const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const SHA = /^[0-9a-f]{40}$/;
 
 const PACKAGES = {
@@ -155,6 +157,27 @@ export class VictoryBuilder {
   /** Installe le commit épinglé, ou le dernier publié s'il n'y en a pas. */
   install() { return this.#run('install', () => this.#build(async () => this.pinned ?? this.latest())); }
 
+  /**
+   * Journal complet de la dernière opération, précédé de quoi le comprendre (version de SixM, portage,
+   * commit, système, état) : à copier pour demander de l'aide. Ni chemin personnel ni variable d'environnement.
+   */
+  report() {
+    let text = '';
+    try { text = fs.readFileSync(this.logFile, 'utf8'); } catch { /* aucune opération encore */ }
+    if (text.length > MAX_REPORT) text = `[… début coupé]\n${text.slice(-MAX_REPORT)}`;
+    const installed = this.installed();
+    const head = [
+      `SixM ${VERSION}, ${os.type()} ${os.release()} ${os.arch()}`,
+      `Portage : ${this.name} (${this.repo}), commit ${this.pinned ?? 'dernier publié'}`,
+      `Installé : ${installed ? `${installed.commit}${this.moduleStale(installed) ? ', module SixM à recompiler' : ''}` : 'non'}`,
+      `État : ${this.status}${this.task ? ` (${this.task})` : ''}${this.step ? `, ${this.step}` : ''}`,
+      ...(this.error ? [`Erreur : ${this.error}`] : []),
+    ];
+    const home = os.homedir();
+    const body = home.length > 3 ? text.split(home).join('~') : text;
+    return `${head.join('\n')}\n\n${body.trimEnd() || '(journal vide)'}\n`;
+  }
+
   /** Le module SixM a changé depuis la compilation. */
   moduleStale(installed = this.installed()) { return !!installed && installed.module !== this.module.id; }
 
@@ -208,7 +231,7 @@ export class VictoryBuilder {
     Object.assign(this, { status: 'running', task, step: 'Préparation', progress: null, error: null, log: [], cancelled: false });
     fs.mkdirSync(this.dir, { recursive: true });
     fs.mkdirSync(path.dirname(this.logFile), { recursive: true });
-    fs.writeFileSync(this.logFile, '');
+    fs.writeFileSync(this.logFile, `# ${this.name} (${this.repo}) : ${task}, ${new Date().toISOString()}\n`);
     this.running = (async () => {
       try {
         await fn();

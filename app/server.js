@@ -198,6 +198,7 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
       launcher.launch(settings.value.victory, game, launchEnv());
     },
     'POST /api/game/stop': () => launcher.stop(),
+    'GET /api/victory/log': () => ({ text: current().report() }),
     'POST /api/victory/check': async () => { await current().check(); },
     'POST /api/victory/install': () => startBuild((b) => b.install()),
     'POST /api/victory/update': () => startBuild((b) => b.update()),

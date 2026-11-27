@@ -70,6 +70,7 @@ async function request(path, options = {}) {
   throw Object.assign(new Error(error ?? `erreur ${res.status}`), { status: res.status });
 }
 const post = async (path, body = {}) => (await request(path, { method: 'POST', body: JSON.stringify(body) })).json();
+const get = async (path) => (await request(path)).json();
 
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -301,7 +302,8 @@ function gameBar() {
     if (ok) act(() => post('/api/game/stop'));
   }, 'danger');
   const log = h('div', { class: 'console short' });
-  const details = h('details', {}, h('summary', { class: 'small muted' }, 'Journal de VIctory'), log);
+  const copyLog = btn('Copier le journal', () => act(async () => { await navigator.clipboard.writeText(state.game.log.join('\n') + '\n'); toast('Journal copié'); }), 'quiet');
+  const details = h('details', {}, h('summary', { class: 'small muted' }, 'Journal de VIctory'), log, h('div', { class: 'row' }, copyLog));
   const el = h('div', { class: 'card', hidden: true }, h('div', { class: 'row' }, text, stop), details);
   return {
     el,
@@ -331,7 +333,14 @@ function victoryPanel({ onLater } = {}) {
   const step = h('div', { class: 'grow' }), pct = h('span', { class: 'num muted' }), fill = h('i'), meter = h('div', { class: 'meter big' }, fill);
   const work = h('div', { class: 'form', hidden: true }, h('div', { class: 'row' }, step, pct, btn('Annuler', () => act(() => post('/api/victory/cancel')), 'danger')), meter);
   const error = h('p', { class: 'note error', hidden: true });
-  const log = h('div', { class: 'console short', role: 'log' }), details = h('details', {}, h('summary', { class: 'small muted' }, 'Journal'), log);
+  const log = h('div', { class: 'console short', role: 'log' });
+  // Le journal complet, avec la version de SixM et du portage : à coller dans un rapport de bug.
+  const copyLog = btn('Copier le journal', () => act(async () => {
+    const { text } = await get('/api/victory/log');
+    await navigator.clipboard.writeText(text);
+    toast('Journal copié');
+  }), 'quiet');
+  const details = h('details', {}, h('summary', { class: 'small muted' }, 'Journal'), log, h('div', { class: 'row' }, copyLog));
   const el = h('section', { class: 'card victory' }, head, list, work, error, details, actions);
 
   const install = async (id) => {

@@ -129,6 +129,10 @@ impl SixmApp {
                 ui.add_space(6.0);
                 egui::CollapsingHeader::new(theme::muted("Journal")).id_salt("victory-log").default_open(running).show(ui, |ui| {
                     log_box(ui, "victory-log-box", &v.log, 220.0);
+                    ui.add_space(6.0);
+                    if theme::button(ui, Kind::Ghost, ic::COPY, "Copier le journal").clicked() {
+                        self.copy_build_log();
+                    }
                 });
             }
             if !running {
@@ -153,6 +157,17 @@ impl SixmApp {
                     }
                 });
             }
+        });
+    }
+
+    /// Le journal complet de la compilation, avec les versions de SixM et du portage : pour un rapport de bug.
+    fn copy_build_log(&self) {
+        self.act(|api| {
+            let text = api.get("/api/victory/log")?.get("text").and_then(|t| t.as_str()).unwrap_or_default().to_string();
+            Ok(Some(Box::new(move |app: &mut SixmApp| {
+                app.ctx.copy_text(text);
+                app.toast("Journal copié", false);
+            }) as Job))
         });
     }
 
@@ -204,6 +219,11 @@ impl SixmApp {
             if !g.log.is_empty() {
                 egui::CollapsingHeader::new(theme::muted("Journal de VIctory")).id_salt("game-log").show(ui, |ui| {
                     log_box(ui, "game-log-box", &g.log, 160.0);
+                    ui.add_space(6.0);
+                    if theme::button(ui, Kind::Ghost, ic::COPY, "Copier le journal").clicked() {
+                        ui.ctx().copy_text(g.log.join("\n") + "\n");
+                        self.toast("Journal copié", false);
+                    }
                 });
             }
         });

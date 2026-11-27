@@ -407,6 +407,13 @@ impl Api {
         Self::check(res)?.body_mut().read_json::<State>().map_err(|e| e.to_string())
     }
 
+    /// GET qui renvoie du JSON.
+    pub fn get(&self, path: &str) -> Result<Value, String> {
+        let res = self.agent.get(format!("{}{}", self.origin, path)).header("x-sixm-token", &self.token).call().map_err(Self::offline)?;
+        let mut res = Self::check(res)?;
+        Ok(res.body_mut().read_json::<Value>().unwrap_or(Value::Null))
+    }
+
     pub fn post(&self, path: &str, body: Value) -> Result<Value, String> {
         let res = self
             .agent
