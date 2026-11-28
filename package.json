@@ -1,6 +1,6 @@
 {
   "name": "sixm",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "SixM - framework multijoueur/modding moddable et agnostique du jeu, pensé pour GTA VI PC (portages inclus)",
   "type": "module",
   "bin": {
