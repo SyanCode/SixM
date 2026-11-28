@@ -39,6 +39,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run test:ci
       - name: Tests du module VIctory
+        timeout-minutes: 10
         run: cargo test --manifest-path integrations/victory/sixm-bridge/Cargo.toml
       - run: npm run package
       - name: Essai de l'installateur

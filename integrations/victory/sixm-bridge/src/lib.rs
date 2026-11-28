@@ -76,9 +76,19 @@ mod server {
         stream.set_nodelay(true)?;
         stream.set_read_timeout(Some(Duration::from_secs(2)))?;
         stream.set_write_timeout(Some(Duration::from_secs(2)))?;
-        let mut line = String::new();
-        BufReader::new(stream.try_clone()?.take(256)).read_line(&mut line)?;
-        if !same(line.trim_end(), token) {
+        // Byte by byte: a buffer would also swallow the orders sent right after the token.
+        let mut line = Vec::new();
+        let mut byte = [0u8; 1];
+        while line.len() <= 256 {
+            if stream.read(&mut byte)? == 0 {
+                return Ok(());
+            }
+            if byte[0] == b'\n' {
+                break;
+            }
+            line.push(byte[0]);
+        }
+        if !same(String::from_utf8_lossy(&line).trim_end(), token) {
             return Ok(());
         }
         let orders = read_orders(&stream)?;
@@ -475,7 +485,7 @@ mod server {
             let ready = lines.next().unwrap();
             assert!(ready.ends_with(r#""teleport":true,"values":[{"name":"flag","type":"u8"}],"scanner":false}"#), "{ready}");
             s.write_all(b"{\"t\":\"teleport\",\"x\":1,\"y\":2,\"z\":3}\n{\"t\":\"set\",\"name\":\"flag\",\"value\":7,\"hold\":true}\n{\"t\":\"set\",\"name\":\"nope\",\"value\":1}\n{\"t\":\"set\",\"name\":\"flag\",\"value\":300}\n").unwrap();
-            let did: Vec<String> = lines.filter(|l| l.contains(r#""t":"did""#)).take(4).collect();
+            let did: Vec<String> = lines.take(400).filter(|l| l.contains(r#""t":"did""#)).take(4).collect();
             assert_eq!(did[0], r#"{"t":"did","what":"teleport","ok":true,"error":null}"#);
             assert_eq!(did[1], r#"{"t":"did","what":"flag","ok":true,"error":null}"#);
             assert!(did[2].contains(r#""ok":false"#) && did[2].contains("no such value"), "{}", did[2]);
@@ -505,7 +515,8 @@ mod server {
             let mut lines = BufReader::new(s.try_clone().unwrap()).lines().map_while(Result::ok);
             let mut answer = |s: &mut TcpStream, order: &str, start: &str| {
                 s.write_all(format!("{order}\n").as_bytes()).unwrap();
-                lines.by_ref().find(|l| l.starts_with(start) && !l.contains(r#""busy":true"#)).unwrap()
+                // Borné : un message manquant fait échouer le test au lieu d'attendre sans fin (une ligne `tick` par seconde).
+                lines.by_ref().take(600).find(|l| l.starts_with(start) && !l.contains(r#""busy":true"#)).unwrap()
             };
             let first = answer(&mut s, r#"{"t":"scan","kind":"first","type":"i32","test":"exact","a":-73421901}"#, r#"{"t":"scan""#);
             let at = SEARCHED.as_ptr() as u64;
@@ -526,7 +537,7 @@ mod server {
             let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
             s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
             s.write_all(format!("{TOKEN}\n{{\"t\":\"poke\",\"address\":{},\"type\":\"i32\",\"value\":1}}\n", SEARCHED.as_ptr() as u64).as_bytes()).unwrap();
-            let did = BufReader::new(s).lines().map_while(Result::ok).find(|l| l.contains(r#""t":"did""#)).unwrap();
+            let did = BufReader::new(s).lines().map_while(Result::ok).take(20).find(|l| l.contains(r#""t":"did""#)).unwrap();
             assert!(did.contains("memory search is off"), "{did}");
         }
 
