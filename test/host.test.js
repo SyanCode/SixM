@@ -12,7 +12,7 @@ import { BanList } from '../server/bans.js';
 import { runCommand } from '../server/console.js';
 import { SixMClient } from '../client/client.js';
 import { MockAdapter } from '../client/adapters/mock.js';
-import { serverUrl } from '../client/address.js';
+import { serverUrl, serverUrls } from '../client/address.js';
 
 const cli = fileURLToPath(new URL('../bin/sixm.js', import.meta.url));
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'sixm-'));
@@ -47,6 +47,9 @@ test('adresses : hôte, port, IPv6, URL', () => {
   assert.equal(serverUrl('1.2.3.4:5'), 'ws://1.2.3.4:5/');
   assert.equal(serverUrl('[::1]'), 'ws://[::1]:30120/');
   assert.equal(serverUrl('wss://jeu.exemple.fr'), 'wss://jeu.exemple.fr');
+  // Nom de domaine sans port : serveur maison (30120) ou derrière un reverse proxy en HTTPS.
+  assert.deepEqual(serverUrls('sixm.exemple.fr'), ['ws://sixm.exemple.fr:30120/', 'wss://sixm.exemple.fr/']);
+  for (const a of ['sixm.exemple.fr:30120', 'wss://x.fr', '1.2.3.4', 'localhost', 'pc.local', '[::1]']) assert.equal(serverUrls(a).length, 1, a);
 });
 
 test('mot de passe : refus, accès, puis blocage après 5 échecs', async () => {

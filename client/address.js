@@ -10,9 +10,56 @@ export function serverUrl(address, defaultPort = 30120) {
   return url.href;
 }
 
+/**
+ * Adresses WebSocket à essayer. Un nom de domaine sans port peut être un serveur maison (port 30120)
+ * ou un serveur derrière un reverse proxy en HTTPS (Mas, nginx : wss://nom/) : les deux.
+ */
+export function serverUrls(address, defaultPort = 30120) {
+  const url = serverUrl(address, defaultPort);
+  const text = String(address).trim();
+  if (/^wss?:\/\//i.test(text) || /:\d+$/.test(text)) return [url];
+  const host = new URL(url).hostname;
+  const ip = /^[\d.]+$/.test(host) || host.startsWith('[');
+  const local = !host.includes('.') || /\.(local|lan|home|internal|localdomain|home\.arpa)$/i.test(host);
+  return ip || local ? [url] : [url, `wss://${host}/`];
+}
+
+const resolved = new Map(); // adresse -> { url, at }
+
+/** L'adresse WebSocket qui répond parmi `serverUrls` (gardée 10 min), sinon la première. */
+export async function resolveServer(address, { timeoutMs = 4000 } = {}) {
+  const urls = serverUrls(address);
+  if (urls.length === 1) return urls[0];
+  const hit = resolved.get(address);
+  if (hit && Date.now() - hit.at < 600000) return hit.url;
+  const probe = async (u) => {
+    const res = await fetch(new URL('/info.json', u.replace(/^ws/i, 'http')), { signal: AbortSignal.timeout(timeoutMs), redirect: 'error' });
+    await res.body?.cancel();
+    if (!res.ok) throw new Error(String(res.status));
+    return u;
+  };
+  try {
+    const url = await Promise.any(urls.map(probe));
+    resolved.set(address, { url, at: Date.now() });
+    return url;
+  } catch {
+    return urls[0];
+  }
+}
+
 /** Fiche publique d'un serveur, validée : { name, description, players, maxPlayers, password, resources, ping }. */
 export async function queryServer(address, { timeoutMs = 3000 } = {}) {
-  const url = new URL('/info.json', serverUrl(address).replace(/^ws/i, 'http'));
+  const urls = serverUrls(address);
+  if (urls.length > 1) {
+    // La première adresse qui répond ; son temps de réponse est mesuré à part.
+    const url = await resolveServer(address, { timeoutMs });
+    return queryOne(url, timeoutMs);
+  }
+  return queryOne(urls[0], timeoutMs);
+}
+
+async function queryOne(wsUrl, timeoutMs) {
+  const url = new URL('/info.json', wsUrl.replace(/^ws/i, 'http'));
   const start = performance.now();
   const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), redirect: 'error' });
   const ping = Math.round(performance.now() - start);

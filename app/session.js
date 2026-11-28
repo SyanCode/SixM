@@ -1,6 +1,6 @@
 import { SixMClient } from '../client/client.js';
 import { createAdapter } from '../client/adapters/index.js';
-import { serverUrl } from '../client/address.js';
+import { resolveServer, serverUrl } from '../client/address.js';
 import { GameModule } from '../client/module.js';
 
 const MAX_LOG = 200;
@@ -25,12 +25,20 @@ export class Session {
 
   connect({ address, name, password, identity, adapter: adapterName }) {
     if (this.status !== 'idle') throw new Error('déjà connecté à un serveur');
-    const url = serverUrl(address);
+    serverUrl(address); // adresse invalide : refusée tout de suite
     const adapter = createAdapter(adapterName, this.adapterOptions);
     this.#reset('connecting');
-    this.attempt++;
+    const attempt = ++this.attempt;
     Object.assign(this, { address, adapterName, adapter });
     adapter.log = this.#recorder();
+    // Un nom de domaine sans port : port 30120 ou HTTPS (wss://), celui qui répond.
+    return resolveServer(address).then((url) => {
+      if (this.attempt !== attempt || this.status !== 'connecting') { adapter.shutdown(); return false; } // annulé entre-temps
+      return this.#open(url, { name, password, identity, adapter });
+    });
+  }
+
+  #open(url, { name, password, identity, adapter }) {
     const client = this.client = new SixMClient({
       url, name, password, identity, adapter,
       onDisconnect: (reason) => {

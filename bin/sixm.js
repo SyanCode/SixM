@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { queryServer, serverUrl } from '../client/address.js';
+import { queryServer, resolveServer } from '../client/address.js';
 
 const self = fileURLToPath(import.meta.url);
 // Le pack serveur téléchargeable ne contient pas l'interface.
@@ -50,7 +50,7 @@ async function main([cmd = hasApp ? 'app' : 'help', ...args]) {
       return console.log(JSON.stringify(await queryServer(args[0], { timeoutMs: 5000 }), null, 2));
     case 'connect': {
       const { join } = await import('../client/run.js');
-      return join(serverUrl(args[0] ?? 'localhost'), args[1], args[2]);
+      return join(await resolveServer(args[0] ?? 'localhost'), args[1], args[2]);
     }
     default:
       console.log(HELP);
