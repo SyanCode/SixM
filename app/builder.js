@@ -24,6 +24,33 @@ const PACKAGES = {
   },
 };
 
+/**
+ * Filtre du journal de cargo : les avertissements du compilateur sur le code du portage (code inutilisé…)
+ * n'appellent rien de notre part et noient le journal. Masqués avec leur détail ; une ligne par crate les
+ * compte. Les erreurs restent entières. Renvoie la ligne à garder, ou null.
+ */
+export function hideWarnings() {
+  let hiding = false;
+  return (line) => {
+    const summary = /^warning: `([^`]+)` \([^)]*\) generated (\d+) warnings?/.exec(line);
+    if (summary) {
+      hiding = false;
+      return `   ${summary[1]} : ${summary[2]} avertissement(s) du code du portage, masqué(s)`;
+    }
+    if (/^warning(\[[\w-]+\])?: /.test(line)) {
+      hiding = true;
+      return null;
+    }
+    if (hiding) {
+      // Le détail d'un avertissement : lignes en retrait (flèches, notes), lignes de code numérotées, « ... ».
+      const step = /^\s+(Compiling|Checking|Finished|Downloaded|Downloading|Fresh|Running|Building|Updating|Locking|Adding|Blocking)\b/.test(line);
+      if ((/^\s/.test(line) && !step) || /^\d+\s*\|/.test(line) || line === '...') return null;
+      hiding = false;
+    }
+    return line;
+  };
+}
+
 /** Fichiers du module SixM et leur empreinte. */
 export function moduleSource(dir = MODULE) {
   const files = ['Cargo.toml', ...fs.readdirSync(path.join(dir, 'src')).filter((f) => f.endsWith('.rs')).sort().map((f) => `src/${f}`)]
@@ -104,6 +131,7 @@ export class VictoryBuilder {
     this.progress = null; // 0..1
     this.error = null;
     this.log = [];
+    this.warnings = hideWarnings();
     this.checks = null;
     this.child = null;
     this.cancelled = false;
@@ -241,7 +269,7 @@ export class VictoryBuilder {
   #run(task, fn) {
     if (!this.supported) throw new Error(`l'installation de ${this.name} demande Windows`);
     if (this.busy) throw new Error('une installation est déjà en cours');
-    Object.assign(this, { status: 'running', task, step: 'Préparation', progress: null, error: null, log: [], cancelled: false });
+    Object.assign(this, { status: 'running', task, step: 'Préparation', progress: null, error: null, log: [], cancelled: false, warnings: hideWarnings() });
     fs.mkdirSync(this.dir, { recursive: true });
     fs.mkdirSync(path.dirname(this.logFile), { recursive: true });
     fs.writeFileSync(this.logFile, `# ${this.name} (${this.repo}) : ${task}, ${new Date().toISOString()}\n`);
@@ -421,6 +449,11 @@ export class VictoryBuilder {
   #line(text) {
     const clean = text.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '').replace(/[\u0000-\u0008\u000b-\u001f]/g, '').trimEnd();
     if (!clean) return;
+    const shown = this.warnings(clean);
+    if (shown !== null) this.#keep(shown);
+  }
+
+  #keep(clean) {
     this.log.push(clean.slice(0, 400));
     if (this.log.length > MAX_LOG) this.log.splice(0, this.log.length - MAX_LOG);
     try { fs.appendFileSync(this.logFile, clean + '\n'); } catch { /* le journal à l'écran suffit */ }

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createApp } from '../app/server.js';
-import { isExe, PINNED, VictoryBuilder } from '../app/builder.js';
+import { hideWarnings, isExe, PINNED, VictoryBuilder } from '../app/builder.js';
 
 const skip = process.platform !== 'win32' && 'Windows seulement';
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'sixm-'));
@@ -325,4 +325,26 @@ test('journal à copier : en-tête de diagnostic, journal complet, dossier perso
     await app.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('journal : avertissements du code du portage masqués, erreurs gardées', () => {
+  const f = hideWarnings();
+  const out = [
+    '   Compiling victory-gpu v0.1.0 (~\\src\\crates\\victory-gpu)',
+    'warning: variant `Title` is never constructed', '    --> crates\\victory-gpu\\src\\host.rs:8597:5', '     |',
+    '8591 | enum Touch {', '     |      ----- variant in this enum', '...', '8597 |     Title,', '     |     ^^^^^',
+    '     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default',
+    'warning: calls to `std::mem::drop` with a value that implements `Copy` does nothing', '  --> crates\\x.rs:64:48', '   |',
+    '   Compiling victory-hle v0.1.0 (~\\src\\crates\\victory-hle)',
+    'warning: `victory-gpu` (lib) generated 12 warnings',
+    'error[E0425]: cannot find value `x` in this scope', '  --> src\\main.rs:2:5', '   |',
+    '    Finished `release` profile [optimized + debuginfo] target(s) in 1m 04s',
+  ].map(f).filter((l) => l !== null);
+  assert.deepEqual(out, [
+    '   Compiling victory-gpu v0.1.0 (~\\src\\crates\\victory-gpu)',
+    '   Compiling victory-hle v0.1.0 (~\\src\\crates\\victory-hle)',
+    '   victory-gpu : 12 avertissement(s) du code du portage, masqué(s)',
+    'error[E0425]: cannot find value `x` in this scope', '  --> src\\main.rs:2:5', '   |',
+    '    Finished `release` profile [optimized + debuginfo] target(s) in 1m 04s',
+  ]);
 });
