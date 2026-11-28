@@ -5,5 +5,5 @@
   "tickRate": 20,
   "syncRadius": 0,
   "resourcesDir": "resources",
-  "autostart": ["hello"]
+  "autostart": ["*"]
 }
