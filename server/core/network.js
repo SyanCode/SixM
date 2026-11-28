@@ -5,6 +5,7 @@ import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { playerUid, verifyChallenge } from '../identity.js';
 import { cleanValue } from '../menus.js';
+import { renderPage } from '../legal.js';
 
 const PING_MS = 15000;
 const MAX_BUFFERED = 1 << 20;
@@ -89,6 +90,14 @@ export class Network {
   }
 
   #onRequest(req, res) {
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      const html = renderPage((req.url ?? '').split(/[?#]/)[0], this.config);
+      if (html) {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=300' });
+        res.end(req.method === 'HEAD' ? undefined : html);
+        return;
+      }
+    }
     let body = null, status = 404;
     if (req.method === 'GET' && req.url === '/info.json') body = this.info();
     else if (req.method === 'GET' && req.url === '/players.json') {
