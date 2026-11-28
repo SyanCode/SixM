@@ -59,7 +59,8 @@ export class MockAdapter extends GameAdapter {
   }
   async init() {}
   getLocalPlayerPosition() { return this.local; }
-  setRemotePlayer(id, name, pos) { this.remotes.set(id, { name, pos }); }
+  setRemotePlayer(id, name, pos, avatar = null) { this.remotes.set(id, { name, pos, avatar }); }
+  setModels(models) { this.models = models; }
   removeRemotePlayer(id) { this.remotes.delete(id); }
   log(text) { this.logs.push(text); console.log(`[game] ${text}`); }
 }

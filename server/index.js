@@ -13,6 +13,7 @@ import { MenuHub, cleanNotice, cleanWorld } from './menus.js';
 const WORLD_SECONDS_PER_MINUTE = 2;
 import { loadConfig, normalizeConfig } from './config.js';
 import { cleanAction, NO_ABILITIES, SCANNER_ACTIONS } from './game.js';
+import { cleanAvatar, DEFAULT_AVATAR } from './avatars.js';
 import { startConsole } from './console.js';
 import { UID } from './identity.js';
 
@@ -24,7 +25,7 @@ export async function createServer(rawConfig) {
   const access = new AccessList(config.accessFile);
   let net, menus;
   const player = (id) => world.players.get(id);
-  const view = (p) => p && { id: p.id, name: p.name, uid: p.uid, admin: access.isAdmin(p.uid), pos: p.pos, located: p.located, game: p.game ?? NO_ABILITIES };
+  const view = (p) => p && { id: p.id, name: p.name, uid: p.uid, admin: access.isAdmin(p.uid), pos: p.pos, located: p.located, game: p.game ?? NO_ABILITIES, avatar: p.avatar ?? DEFAULT_AVATAR };
   /** Action sur le jeu d'un joueur, seulement si son jeu l'a annoncée (le module la vérifie encore). */
   const act = (id, action) => {
     const p = player(id), a = cleanAction(action);
@@ -96,6 +97,16 @@ export async function createServer(rawConfig) {
       // Écrit dans le profil local du joueur : { key: 'position', chain, teleport } ou { key: 'value', name, type, chain }.
       saveProfile: (id, entry) => act(id, { action: 'saveProfile', ...entry }),
     },
+    // Avatars 3D dessinés par la surcouche : modèles des ressources (resource.json, "models"), échelle, couleur.
+    models: () => Object.keys(resources.models()),
+    setAvatar: (id, avatar) => {
+      const p = player(id);
+      if (!p) return false;
+      p.avatar = cleanAvatar({ ...(p.avatar ?? DEFAULT_AVATAR), ...avatar });
+      if (!resources.models()[p.avatar.model]) p.avatar.model = DEFAULT_AVATAR.model;
+      net.sendRoster();
+      return true;
+    },
     // Menus : entrée du menu principal, ouverture et choix.
     addMenu: (entry) => menus.add(resource, entry),
     openMenu: (id, menu) => { const p = player(id); if (p) menus.open(p, menu); },
@@ -107,6 +118,10 @@ export async function createServer(rawConfig) {
   net = new Network({ port: config.port, world, events, config, resources, bans, access });
   menus = net.menus = new MenuHub({ net, events, config });
   events.on('resourceStop', (name) => menus.removeOwner(name));
+  // Les modèles changent avec les ressources : renvoyés à tous.
+  const sendModels = () => net?.broadcast({ t: 'models', models: resources.models() });
+  events.on('resourceStart', sendModels);
+  events.on('resourceStop', sendModels);
   events.on('playerDropped', (p) => menus.forget(p));
 
   // "*" : tous les mods déposés dans le dossier des ressources.

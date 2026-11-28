@@ -79,7 +79,8 @@ export class VictoryAdapter extends GameAdapter {
             if (this.roster) this.#send(this.roster);
             if (this.menu) this.#send({ t: 'menu', menu: this.menu });
             if (this.world) this.setWorld(this.world);
-            for (const [id, r] of this.remotes) this.#send({ t: 'setRemote', id, name: r.name, ...r.pos });
+            if (this.models) this.setModels(this.models);
+            for (const [id, r] of this.remotes) this.setRemotePlayer(id, r.name, r.pos, r.avatar);
             resolve();
           } else if (ready && m.t === 'localPlayer' && [m.x, m.y, m.z, m.h].every(Number.isFinite)) {
             this.pos = { x: m.x, y: m.y, z: m.z, h: m.h };
@@ -136,9 +137,14 @@ export class VictoryAdapter extends GameAdapter {
   getLocalPlayerPosition() { return this.module?.position ?? this.pos; }
   getAbilities() { return this.module?.abilities ?? { teleport: false, values: [] }; }
   act(action) { return this.module?.act(action) ?? false; }
-  setRemotePlayer(id, name, pos) {
-    this.remotes.set(id, { name, pos });
-    this.#send({ t: 'setRemote', id, name, ...pos });
+  setRemotePlayer(id, name, pos, avatar = null) {
+    this.remotes.set(id, { name, pos, avatar });
+    this.#send({ t: 'setRemote', id, name, ...pos, ...(avatar && { model: avatar.model, scale: avatar.scale, color: avatar.color }) });
+  }
+  /** Modèles 3D des avatars, un message chacun (la surcouche lit des lignes d'1 Mio au plus). */
+  setModels(models) {
+    this.models = models;
+    for (const [name, m] of Object.entries(models)) this.#send({ t: 'model', name, ...m });
   }
   removeRemotePlayer(id) {
     this.remotes.delete(id);

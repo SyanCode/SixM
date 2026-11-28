@@ -1,0 +1,1 @@
+{ "name": "avatars", "description": "Avatars 3D pour la surcouche : un robot d'exemple. Ajoutez vos .obj dans models/.", "models": ["models/robot.obj"] }

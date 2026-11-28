@@ -4,7 +4,9 @@
  * serveur ne voit que ces noms ; le module refuse tout ce que le profil ne prévoit pas.
  */
 export const VALUE_TYPES = ['u8', 'i32', 'f32'];
-const NAME = /^[a-z0-9_]{1,24}$/;
+const NAME_RE = /^[a-z0-9_]{1,24}$/;
+// Un vrai texte : RegExp.test(undefined) teste « undefined ».
+const NAME = { test: (n) => typeof n === 'string' && NAME_RE.test(n) };
 const MAX_VALUES = 32;
 const coord = (v) => Number.isFinite(v) && Math.abs(v) < 1e6;
 

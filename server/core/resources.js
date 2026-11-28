@@ -1,11 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import { DEFAULT_MODEL, defaultModel, MAX_MODELS, parseObj } from '../avatars.js';
+
+const BUILT_IN = { [DEFAULT_MODEL]: defaultModel() };
 
 /**
  * Gestionnaire de ressources (équivalent des "resources" FiveM).
  * Chaque ressource = un dossier avec resource.json :
- *   { "name": "hello", "server": ["server.js"], "client": ["client.js"] }
+ *   { "name": "hello", "server": ["server.js"], "client": ["client.js"], "models": ["models/robot.obj"] }
+ * `models` : avatars 3D (Wavefront OBJ, voir server/avatars.js), nommés d'après leur fichier ou `{ name, file }`.
  * Les scripts serveur s'exécutent dans un contexte vm isolé avec une API restreinte.
  * NB : vm n'est PAS une frontière de sécurité face à du code hostile ; n'exécutez
  * que des ressources de confiance (voir docs/ARCHITECTURE.md).
@@ -53,9 +57,15 @@ export class ResourceManager {
       if (!full.startsWith(root + path.sep)) throw new Error(`chemin hors ressource: ${file}`);
       return { full, source: fs.readFileSync(full, 'utf8') };
     };
-    let clientFiles;
+    let clientFiles, models = {};
     try {
       clientFiles = (manifest.client ?? []).map((f) => ({ file: f, source: read(f).source }));
+      for (const m of (Array.isArray(manifest.models) ? manifest.models : []).slice(0, MAX_MODELS)) {
+        const file = typeof m === 'string' ? m : m?.file;
+        const label = (typeof m === 'object' && m?.name) || path.basename(String(file), path.extname(String(file)));
+        if (!/^[\w.-]{1,32}$/.test(label)) throw new Error(`nom de modèle invalide : ${label}`);
+        try { models[label] = parseObj(read(file).source); } catch (e) { throw new Error(`modèle ${file} : ${e.message}`); }
+      }
       for (const file of manifest.server ?? []) {
         const { full, source } = read(file);
         new vm.Script(source, { filename: full }).runInContext(ctx, { timeout: 2000 });
@@ -66,7 +76,7 @@ export class ResourceManager {
       for (const id of timers) clearTimeout(id);
       throw e;
     }
-    this.running.set(name, { manifest, clientFiles, timers });
+    this.running.set(name, { manifest, clientFiles, timers, models });
     this.events.emit('resourceStart', name);
     console.log(`[resources] démarrée: ${name}`);
   }
@@ -83,6 +93,13 @@ export class ResourceManager {
   }
 
   restart(name) { this.stop(name); this.start(name); }
+
+  /** Avatars 3D des ressources démarrées, et celui par défaut. */
+  models() {
+    const out = { ...BUILT_IN };
+    for (const r of this.running.values()) for (const [n, m] of Object.entries(r.models)) if (Object.keys(out).length < MAX_MODELS) out[n] = m;
+    return out;
+  }
 
   /** Scripts client à envoyer aux joueurs à la connexion. */
   clientBundle() {

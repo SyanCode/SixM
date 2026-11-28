@@ -12,7 +12,9 @@ export class GameAdapter {
   /** Position du joueur local: { x, y, z, h } (h en radians), ou null si inconnue. */
   getLocalPlayerPosition() { throw new Error('non implémenté'); }
   /** Applique la position d'un joueur distant (ped/avatar). */
-  setRemotePlayer(id, name, pos) { throw new Error('non implémenté'); }
+  setRemotePlayer(id, name, pos, avatar) { throw new Error('non implémenté'); }
+  /** Modèles 3D des avatars (server/avatars.js), pour un jeu ou une surcouche qui sait les dessiner (facultatif). */
+  setModels(models) {}
   removeRemotePlayer(id) { throw new Error('non implémenté'); }
   /** Affichage de texte (chat, notifications). */
   log(text) { throw new Error('non implémenté'); }

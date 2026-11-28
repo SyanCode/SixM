@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { cleanAbilities, cleanPointers, cleanResult, cleanScan } from '../game.js';
+import { DEFAULT_AVATAR } from '../avatars.js';
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { playerUid, verifyChallenge } from '../identity.js';
@@ -84,7 +85,7 @@ export class Network {
 
   /** Joueurs connectés, pour le roster et la console. */
   roster() {
-    return [...this.world.players.values()].map(({ id, name, uid }) => ({ id, name, admin: !!this.access?.isAdmin(uid) }));
+    return [...this.world.players.values()].map(({ id, name, uid, avatar }) => ({ id, name, admin: !!this.access?.isAdmin(uid), avatar: avatar ?? DEFAULT_AVATAR }));
   }
 
   #onRequest(req, res) {
@@ -178,7 +179,7 @@ export class Network {
         player = this.world.addPlayer(name, ws, ip, uid);
         this.send(ws, {
           t: 'welcome', id: player.id, server: this.config.name, uid, motd: this.config.motd, world: this.world.state,
-          tickRate: this.config.tickRate, resources: this.resources.clientBundle(),
+          tickRate: this.config.tickRate, resources: this.resources.clientBundle(), models: this.resources.models(),
         });
         this.sendRoster();
         this.events.emit('playerConnected', player);

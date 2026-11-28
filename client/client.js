@@ -4,6 +4,7 @@ import { ScriptSandbox } from './sandbox.js';
 import { signChallenge } from '../server/identity.js';
 import { cleanMenu, cleanNotice, cleanValue, cleanWorld } from '../server/menus.js';
 import { cleanAbilities, cleanAction, cleanPointers, cleanResult, cleanScan, SCANNER_ACTIONS } from '../server/game.js';
+import { cleanAvatar, cleanModels } from '../server/avatars.js';
 
 const samePos = (a, b) => a && a.x === b.x && a.y === b.y && a.z === b.z && a.h === b.h;
 const isPos = (p) => p && [p.x, p.y, p.z, p.h].every(Number.isFinite);
@@ -142,6 +143,12 @@ export class SixMClient {
     this.sandbox?.dispose();
   }
 
+  /** Avatars 3D du serveur, pour la surcouche. */
+  #setModels(list) {
+    this.models = cleanModels(list);
+    this.adapter.setModels?.(this.models);
+  }
+
   #setWorld(w) {
     if (!w || typeof w !== 'object') return;
     this.world = { ...cleanWorld(w), at: Date.now() };
@@ -164,7 +171,7 @@ export class SixMClient {
       const pos = r.buffer.sample(time);
       if (!pos || samePos(r.applied, pos)) continue;
       r.applied = pos;
-      this.adapter.setRemotePlayer(id, r.name, pos);
+      this.adapter.setRemotePlayer(id, r.name, pos, r.avatar);
     }
   }
 
@@ -178,6 +185,7 @@ export class SixMClient {
       this.sandbox.load(m.resources);
       if (typeof m.motd === 'string' && m.motd.trim()) this.adapter.log(clean(m.motd, 256));
       if (m.world) this.#setWorld(m.world);
+      this.#setModels(m.models);
     } else if (m.t === 'snapshot') {
       if (!Array.isArray(m.players)) return;
       const now = performance.now();
@@ -186,7 +194,7 @@ export class SixMClient {
         if (!Number.isSafeInteger(p?.id) || p.id === this.id || !isPos(p.pos)) continue;
         seen.add(p.id);
         let r = this.remotes.get(p.id);
-        if (!r) this.remotes.set(p.id, r = { name: clean(p.name, 24), buffer: new PositionBuffer(), applied: null });
+        if (!r) this.remotes.set(p.id, r = { name: clean(p.name, 24), buffer: new PositionBuffer(), applied: null, avatar: this.roster.find((x) => x.id === p.id)?.avatar ?? cleanAvatar({}) });
         r.buffer.push(now, p.pos);
       }
       for (const id of this.remotes.keys()) {
@@ -196,10 +204,14 @@ export class SixMClient {
       }
       this.players = m.players.filter((p) => Number.isSafeInteger(p?.id) && isPos(p.pos))
         .map((p) => ({ id: p.id, name: clean(p.name, 24), pos: p.pos }));
+    } else if (m.t === 'models') {
+      this.#setModels(m.models);
     } else if (m.t === 'roster') {
       if (!Array.isArray(m.players)) return;
       this.roster = m.players.slice(0, 1024).filter((p) => Number.isSafeInteger(p?.id))
-        .map((p) => ({ id: p.id, name: clean(p.name, 24), admin: p.admin === true }));
+        .map((p) => ({ id: p.id, name: clean(p.name, 24), admin: p.admin === true, avatar: cleanAvatar(p.avatar) }));
+      // Un avatar changé est renvoyé au jeu même si le joueur ne bouge pas.
+      for (const p of this.roster) { const r = this.remotes.get(p.id); if (r && JSON.stringify(r.avatar) !== JSON.stringify(p.avatar)) { r.avatar = p.avatar; r.applied = null; } }
       this.adapter.setRoster(this.serverName, this.roster.map((p) => p.name));
     } else if (m.t === 'event') {
       if (typeof m.name === 'string' && Array.isArray(m.args)) this.sandbox.dispatch(m.name, m.args);

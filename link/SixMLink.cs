@@ -30,6 +30,7 @@ static class Program
     {
         // Rendu seul, sans fenêtre ni appel à Windows : marche aussi sous Mono.
         if (args.Length == 3 && args[0] == "--render-menu") return RenderMenu(args[1], args[2]);
+        if (args.Length == 3 && args[0] == "--render-scene") return RenderScene(args[1], args[2]);
         Native.SetProcessDPIAware();
         Application.EnableVisualStyles();
         // Programme sans console : Console.OutputEncoding échouerait, on ouvre les flux nous-mêmes.
@@ -75,6 +76,29 @@ static class Program
     }
 
     /// Dessine un menu décrit en JSON ({"menu": {...}}) dans un PNG : tests et captures, sans jeu.
+    /// Dessine en 1280×720 ce que la surcouche montrerait au-dessus du jeu après ces messages (une ligne JSON chacun).
+    static int RenderScene(string ndjson, string png)
+    {
+        Bridge bridge = new Bridge();
+        JavaScriptSerializer json = new JavaScriptSerializer();
+        json.MaxJsonLength = 1 << 22;
+        foreach (string line in File.ReadAllLines(ndjson, Encoding.UTF8))
+            if (line.Trim().Length > 0) bridge.Feed(json.Deserialize<Dictionary<string, object>>(line));
+        using (Font font = new Font("Segoe UI Semibold", 10.5f))
+        using (Bitmap b = new Bitmap(1280, 720, PixelFormat.Format32bppArgb))
+        {
+            using (Graphics g = Graphics.FromImage(b))
+            {
+                g.Clear(Color.FromArgb(70, 96, 120));
+                Markers.Scene scene = Markers.Build(bridge, font, 1280, 720);
+                Markers.PaintScene(g, scene, font, 0, 0);
+                Console.WriteLine("labels=" + scene.Labels.Count + " triangles=" + scene.Tris.Count);
+            }
+            b.Save(png, ImageFormat.Png);
+        }
+        return 0;
+    }
+
     static int RenderMenu(string jsonFile, string png)
     {
         Dictionary<string, object> m = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(jsonFile, Encoding.UTF8));
@@ -129,7 +153,9 @@ static class Program
     }
 }
 
-sealed class Remote { public string Name; public double X, Y, Z; }
+sealed class Remote { public string Name; public double X, Y, Z, H, Scale = 1; public string Model = ""; public int Color = -1; }
+/// Modèle 3D d'un avatar (server/avatars.js) : sommets x, y, z ; triangles ; une couleur par triangle (-1 : celle du joueur).
+sealed class Model { public float[] V; public int[] F; public int[] C; }
 sealed class Notice { public string Title, Text; public Color Color; public double Seconds; public DateTime At; }
 sealed class Line { public string Text; public DateTime At; }
 
@@ -139,6 +165,7 @@ sealed class Bridge
     const int MaxLine = 1 << 20;
     public readonly object Lock = new object();
     public readonly Dictionary<int, Remote> Remotes = new Dictionary<int, Remote>();
+    public readonly Dictionary<string, Model> Models = new Dictionary<string, Model>();
     public readonly List<string> Players = new List<string>();
     public readonly List<Line> Lines = new List<Line>();
     public readonly List<MenuData> Menu = new List<MenuData>(); // pile des sous-menus, vide : fermé
@@ -235,6 +262,9 @@ sealed class Bridge
         Server = ""; TargetPid = DefaultTarget; View = null; HasSelf = false; Version++;
     }
 
+    /// Un message comme s'il venait de SixM (pour --render-scene).
+    public void Feed(Dictionary<string, object> m) { lock (Lock) Handle(m); }
+
     bool Handle(Dictionary<string, object> m)
     {
         switch (Str(m, "t", 16))
@@ -245,9 +275,29 @@ sealed class Bridge
                     if (Remotes.Count >= 1024 && !Remotes.ContainsKey(id)) return false;
                     Remote r = new Remote();
                     r.Name = Str(m, "name", 24);
-                    r.X = Num(m, "x"); r.Y = Num(m, "y"); r.Z = Num(m, "z");
+                    r.X = Num(m, "x"); r.Y = Num(m, "y"); r.Z = Num(m, "z"); r.H = Num(m, "h");
+                    r.Model = Str(m, "model", 32);
+                    double scale = Num(m, "scale");
+                    r.Scale = scale >= 0.1 && scale <= 10 ? scale : 1;
+                    string color = Str(m, "color", 7);
+                    int rgb;
+                    r.Color = color.Length == 7 && color[0] == '#' && int.TryParse(color.Substring(1), System.Globalization.NumberStyles.HexNumber, null, out rgb) ? rgb : -1;
                     Remotes[id] = r;
                     return true;
+                }
+            case "model":
+                {
+                    string name = Str(m, "name", 32);
+                    if (name.Length == 0 || (Models.Count >= 33 && !Models.ContainsKey(name))) return false;
+                    float[] v = Floats(m, "v", 12000);
+                    int[] f = Ints(m, "f", 18000), c = Ints(m, "c", 6000);
+                    if (v == null || f == null || c == null || v.Length % 3 != 0 || f.Length % 3 != 0 || c.Length != f.Length / 3) return false;
+                    int n = v.Length / 3;
+                    foreach (int i in f) if (i < 0 || i >= n) return false;
+                    Model md = new Model();
+                    md.V = v; md.F = f; md.C = c;
+                    Models[name] = md;
+                    return false;
                 }
             case "removeRemote": Remotes.Remove((int)Num(m, "id")); return true;
             case "log":
@@ -456,6 +506,43 @@ sealed class Bridge
     {
         object v;
         return m.TryGetValue(k, out v) && v is string ? Clean((string)v, max) : "";
+    }
+
+    static System.Collections.IList List(Dictionary<string, object> m, string k, int max)
+    {
+        object raw;
+        System.Collections.IList list = m.TryGetValue(k, out raw) ? raw as System.Collections.IList : null;
+        return list != null && list.Count <= max ? list : null;
+    }
+
+    static bool IsNumber(object o) { return o is int || o is decimal || o is double || o is long; }
+
+    public static float[] Floats(Dictionary<string, object> m, string k, int max)
+    {
+        System.Collections.IList list = List(m, k, max);
+        if (list == null) return null;
+        float[] out_ = new float[list.Count];
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (!IsNumber(list[i])) return null;
+            double d = Convert.ToDouble(list[i]);
+            if (!(Math.Abs(d) < 1000)) return null;
+            out_[i] = (float)d;
+        }
+        return out_;
+    }
+
+    public static int[] Ints(Dictionary<string, object> m, string k, int max)
+    {
+        System.Collections.IList list = List(m, k, max);
+        if (list == null) return null;
+        int[] out_ = new int[list.Count];
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (!(list[i] is int)) return null;
+            out_[i] = (int)list[i];
+        }
+        return out_;
     }
 
     public static double Num(Dictionary<string, object> m, string k)
@@ -767,56 +854,137 @@ sealed class Markers : Form
     }
 
     /// Un nom à l'écran : son cadre et la pointe sous lui.
-    sealed class Label
+    public sealed class Label
     {
         public string Text;
         public float X, Y;
         public RectangleF Box;
     }
 
-    readonly Bitmap measureBitmap = new Bitmap(1, 1);
+    /// Un triangle d'avatar projeté, avec sa profondeur pour les dessiner du plus loin au plus proche.
+    public sealed class Tri
+    {
+        public PointF[] P;
+        public double Depth;
+        public Color Color;
+    }
+
+    /// Ce que montre la surcouche au-dessus du jeu : avatars, puis noms.
+    public sealed class Scene
+    {
+        public readonly List<Label> Labels = new List<Label>();
+        public readonly List<Tri> Tris = new List<Tri>();
+        public int Count { get { return Labels.Count + Tris.Count; } }
+    }
+
+    const int MaxTris = 20000; // par image, tous avatars confondus
+    const double AvatarRange = 300; // mètres : au-delà, le nom seulement
+    static readonly double[] Light = Normalize(0.35, -0.45, 0.82);
+
+    static readonly Bitmap measureBitmap = new Bitmap(1, 1);
     string lastKey;
 
-    /// Les noms visibles dans un écran de w×h, déjà mesurés.
-    List<Label> Labels(int w, int h)
+    static double[] Normalize(double x, double y, double z)
     {
-        List<Label> list = new List<Label>();
+        double n = Math.Sqrt(x * x + y * y + z * z);
+        return new double[] { x / n, y / n, z / n };
+    }
+
+    /// Position à l'écran et profondeur d'un point du monde ; faux s'il est derrière la caméra ou très loin hors champ.
+    static bool ProjectFar(double[] m, double x, double y, double z, double w, double h, out float sx, out float sy, out double depth)
+    {
+        double cx = m[0] * x + m[1] * y + m[2] * z + m[3], cy = m[4] * x + m[5] * y + m[6] * z + m[7], cw = m[12] * x + m[13] * y + m[14] * z + m[15];
+        sx = sy = 0; depth = cw;
+        if (!(cw > 0.05)) return false;
+        double nx = cx / cw, ny = cy / cw;
+        if (!(Math.Abs(nx) <= 4 && Math.Abs(ny) <= 4)) return false;
+        sx = (float)((nx + 1) / 2 * w);
+        sy = (float)((1 - ny) / 2 * h);
+        return true;
+    }
+
+    /// Les triangles de l'avatar d'un joueur, placés, tournés selon son cap et ombrés.
+    static void AddAvatar(Bridge bridge, Scene scene, Remote r, double[] view, int w, int h)
+    {
+        Model md;
+        if (r.Model.Length == 0 || !bridge.Models.TryGetValue(r.Model, out md)) return;
+        int n = md.V.Length / 3;
+        double cs = Math.Cos(r.H), sn = Math.Sin(r.H), s = r.Scale;
+        double[] wx = new double[n], wy = new double[n], wz = new double[n], depth = new double[n];
+        PointF[] screen = new PointF[n];
+        bool[] ok = new bool[n];
+        for (int i = 0; i < n; i++)
+        {
+            double lx = md.V[3 * i] * s, ly = md.V[3 * i + 1] * s, lz = md.V[3 * i + 2] * s;
+            wx[i] = r.X + lx * cs - ly * sn; wy[i] = r.Y + lx * sn + ly * cs; wz[i] = r.Z + lz;
+            float px, py;
+            ok[i] = ProjectFar(view, wx[i], wy[i], wz[i], w, h, out px, out py, out depth[i]);
+            screen[i] = new PointF(px, py);
+        }
+        int baseColor = r.Color >= 0 ? r.Color : 0x3e8ed0;
+        for (int t = 0; t < md.F.Length / 3 && scene.Tris.Count < MaxTris; t++)
+        {
+            int a = md.F[3 * t], b = md.F[3 * t + 1], c = md.F[3 * t + 2];
+            if (!ok[a] || !ok[b] || !ok[c]) continue;
+            // Normale dans le monde : l'ombrage ne dépend pas du sens des triangles.
+            double ux = wx[b] - wx[a], uy = wy[b] - wy[a], uz = wz[b] - wz[a], vx = wx[c] - wx[a], vy = wy[c] - wy[a], vz = wz[c] - wz[a];
+            double nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, len = Math.Sqrt(nx * nx + ny * ny + nz * nz);
+            double shade = len > 0 ? 0.45 + 0.55 * Math.Abs((nx * Light[0] + ny * Light[1] + nz * Light[2]) / len) : 0.6;
+            int rgb = md.C[t] >= 0 ? md.C[t] : baseColor;
+            Tri tri = new Tri();
+            tri.P = new PointF[] { screen[a], screen[b], screen[c] };
+            tri.Depth = (depth[a] + depth[b] + depth[c]) / 3;
+            tri.Color = Color.FromArgb(235, (int)(((rgb >> 16) & 255) * shade), (int)(((rgb >> 8) & 255) * shade), (int)((rgb & 255) * shade));
+            scene.Tris.Add(tri);
+        }
+    }
+
+    /// Les avatars et les noms visibles dans un écran de w×h.
+    public static Scene Build(Bridge bridge, Font font, int w, int h)
+    {
+        Scene scene = new Scene();
         using (Graphics g = Graphics.FromImage(measureBitmap))
         {
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             lock (bridge.Lock)
             {
-                if (bridge.View == null || (DateTime.UtcNow - bridge.ViewAt).TotalSeconds > 1) return list;
+                if (bridge.View == null || (DateTime.UtcNow - bridge.ViewAt).TotalSeconds > 1) return scene;
                 foreach (Remote r in bridge.Remotes.Values)
                 {
+                    double d = bridge.HasSelf ? Math.Sqrt(Math.Pow(r.X - bridge.SelfX, 2) + Math.Pow(r.Y - bridge.SelfY, 2) + Math.Pow(r.Z - bridge.SelfZ, 2)) : 0;
+                    if (!bridge.HasSelf || d <= AvatarRange) AddAvatar(bridge, scene, r, bridge.View, w, h);
                     float x, y;
-                    if (!Project(bridge.View, r.X, r.Y, r.Z, w, h, out x, out y)) continue;
+                    // Le nom au-dessus de la tête de l'avatar.
+                    if (!Project(bridge.View, r.X, r.Y, r.Z + 1.0 * r.Scale, w, h, out x, out y)) continue;
                     string text = r.Name;
-                    if (bridge.HasSelf)
-                    {
-                        double d = Math.Sqrt(Math.Pow(r.X - bridge.SelfX, 2) + Math.Pow(r.Y - bridge.SelfY, 2) + Math.Pow(r.Z - bridge.SelfZ, 2));
-                        text += "  " + (d < 1000 ? Math.Round(d) + " m" : (d / 1000).ToString("0.0") + " km");
-                    }
+                    if (bridge.HasSelf) text += "  " + (d < 1000 ? Math.Round(d) + " m" : (d / 1000).ToString("0.0") + " km");
                     SizeF size = g.MeasureString(text, font);
                     Label l = new Label();
                     l.Text = text; l.X = x; l.Y = y;
                     l.Box = new RectangleF(x - size.Width / 2 - 8, y - size.Height - 18, size.Width + 16, size.Height + 4);
-                    list.Add(l);
+                    scene.Labels.Add(l);
                 }
             }
         }
-        return list;
+        scene.Tris.Sort(delegate(Tri a, Tri b) { return b.Depth.CompareTo(a.Depth); });
+        return scene;
     }
 
-    /// Dessine les noms décalés de (dx, dy).
-    void PaintLabels(Graphics g, List<Label> labels, float dx, float dy)
+    /// Dessine la scène décalée de (dx, dy) : avatars du plus loin au plus proche, puis les noms par-dessus.
+    public static void PaintScene(Graphics g, Scene scene, Font font, float dx, float dy)
     {
+        g.SmoothingMode = SmoothingMode.HighSpeed;
+        foreach (Tri t in scene.Tris)
+        {
+            using (SolidBrush b = new SolidBrush(t.Color))
+                g.FillPolygon(b, new PointF[] { new PointF(t.P[0].X + dx, t.P[0].Y + dy), new PointF(t.P[1].X + dx, t.P[1].Y + dy), new PointF(t.P[2].X + dx, t.P[2].Y + dy) });
+        }
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
         using (SolidBrush back = new SolidBrush(Color.FromArgb(175, 16, 20, 18)))
         using (SolidBrush dot = new SolidBrush(Color.FromArgb(246, 184, 60)))
         {
-            foreach (Label l in labels)
+            foreach (Label l in scene.Labels)
             {
                 RectangleF box = new RectangleF(l.Box.X + dx, l.Box.Y + dy, l.Box.Width, l.Box.Height);
                 g.FillRectangle(back, box);
@@ -831,9 +999,9 @@ sealed class Markers : Form
     public Bitmap Render(int w, int h, out int count)
     {
         Bitmap b = new Bitmap(w, h, PixelFormat.Format32bppPArgb);
-        List<Label> labels = Labels(w, h);
-        count = labels.Count;
-        using (Graphics g = Graphics.FromImage(b)) PaintLabels(g, labels, 0, 0);
+        Scene scene = Build(bridge, font, w, h);
+        count = scene.Labels.Count;
+        using (Graphics g = Graphics.FromImage(b)) PaintScene(g, scene, font, 0, 0);
         return b;
     }
 
@@ -843,29 +1011,40 @@ sealed class Markers : Form
         lock (bridge.Lock) live = bridge.View != null && (DateTime.UtcNow - bridge.ViewAt).TotalSeconds < 1 && bridge.Remotes.Count > 0;
         Native.RECT r = new Native.RECT();
         if (target == IntPtr.Zero || !live || !Native.GetClientRect(target, out r) || r.R < 64 || r.B < 64 || r.R > 8192 || r.B > 8192) { Clear(); return; }
-        List<Label> labels = Labels(r.R, r.B);
-        // Aucun nom à l'écran : aucune fenêtre au-dessus du jeu.
-        if (labels.Count == 0) { Clear(); return; }
+        Scene scene = Build(bridge, font, r.R, r.B);
+        // Rien à l'écran : aucune fenêtre au-dessus du jeu.
+        if (scene.Count == 0) { Clear(); return; }
         Native.POINT at = new Native.POINT();
         Native.ClientToScreen(target, ref at);
-        // Seulement la zone des noms, pas tout l'écran : bien moins à composer pour Windows à chaque image.
-        RectangleF area = labels[0].Box;
-        foreach (Label l in labels) area = RectangleF.Union(area, RectangleF.FromLTRB(l.Box.Left, l.Box.Top, l.Box.Right, l.Y));
-        int left = Math.Max(0, (int)Math.Floor(area.Left) - 2), top = Math.Max(0, (int)Math.Floor(area.Top) - 2);
-        int right = Math.Min(r.R, (int)Math.Ceiling(area.Right) + 2), bottom = Math.Min(r.B, (int)Math.Ceiling(area.Bottom) + 2);
-        if (right - left < 1 || bottom - top < 1) { Clear(); return; }
-        // Rien n'a bougé à l'écran depuis la dernière image : rien à redessiner.
+        // Seulement la zone occupée, pas tout l'écran : bien moins à composer pour Windows à chaque image.
+        float left = float.MaxValue, top = float.MaxValue, right = float.MinValue, bottom = float.MinValue;
         StringBuilder key = new StringBuilder();
         key.Append(at.X).Append(',').Append(at.Y);
-        foreach (Label l in labels) key.Append('|').Append((int)l.X).Append(',').Append((int)l.Y).Append(',').Append(l.Text);
+        foreach (Label l in scene.Labels)
+        {
+            left = Math.Min(left, l.Box.Left); top = Math.Min(top, l.Box.Top); right = Math.Max(right, l.Box.Right); bottom = Math.Max(bottom, l.Y);
+            key.Append('|').Append((int)l.X).Append(',').Append((int)l.Y).Append(',').Append(l.Text);
+        }
+        long hash = 17;
+        foreach (Tri t in scene.Tris)
+            foreach (PointF p in t.P)
+            {
+                left = Math.Min(left, p.X); top = Math.Min(top, p.Y); right = Math.Max(right, p.X); bottom = Math.Max(bottom, p.Y);
+                hash = hash * 31 + (int)p.X * 7919 + (int)p.Y;
+            }
+        key.Append('#').Append(scene.Tris.Count).Append(':').Append(hash);
+        int x0 = Math.Max(0, (int)Math.Floor(left) - 2), y0 = Math.Max(0, (int)Math.Floor(top) - 2);
+        int x1 = Math.Min(r.R, (int)Math.Ceiling(right) + 2), y1 = Math.Min(r.B, (int)Math.Ceiling(bottom) + 2);
+        if (x1 - x0 < 1 || y1 - y0 < 1) { Clear(); return; }
+        // Rien n'a bougé à l'écran depuis la dernière image : rien à redessiner.
         string k = key.ToString();
         if (Visible && k == lastKey) return;
         lastKey = k;
-        using (Bitmap b = new Bitmap(right - left, bottom - top, PixelFormat.Format32bppPArgb))
+        using (Bitmap b = new Bitmap(x1 - x0, y1 - y0, PixelFormat.Format32bppPArgb))
         {
-            using (Graphics g = Graphics.FromImage(b)) PaintLabels(g, labels, -left, -top);
+            using (Graphics g = Graphics.FromImage(b)) PaintScene(g, scene, font, -x0, -y0);
             if (!Visible) Show();
-            Native.Layer(Handle, b, at.X + left, at.Y + top);
+            Native.Layer(Handle, b, at.X + x0, at.Y + y0);
         }
     }
 

@@ -27,7 +27,7 @@ SixM est un framework multijoueur et modding agnostique du jeu, dans l'esprit de
 | **Jouer** | Choisissez un jeu et un serveur, puis Jouer. Favoris, chat, joueurs, radar. Un mode démo marche sans jeu. |
 | **VIctory** | Télécharge et compile VIctory, ou un fork comme VIctory Belobug AMD, Tequesta ou VIctory-NVIDIA, sur votre PC, à une version précise, avec journal en direct. Mise à jour toujours manuelle. |
 | **Surcouche en jeu** | Chat, joueurs, radar et menus des mods par-dessus la fenêtre du jeu. F7 menu, F8 pour écrire, F9 pour masquer. Windows seulement. |
-| **Autres joueurs** | Leurs noms apparaissent dans le monde, à leur place, grâce au module SixM pour VIctory. Demande un profil local. |
+| **Autres joueurs** | Un avatar 3D (modèle, taille et couleur au choix) et leur nom, dessinés dans le monde à leur place, grâce au module SixM pour VIctory. Demande un profil local. |
 | **Héberger** | Votre serveur en deux clics : public ou privé, liste blanche, admins, mot de passe, bannissements, console. |
 | **Menus des mods** | Dessinés par SixM d'après ce que décrivent les mods : M pour ouvrir, flèches, cases, listes, curseurs. Un menu d'administration est fourni. |
 | **Mods** | Déposez un zip, activez-le. Les joueurs le reçoivent en se connectant. |

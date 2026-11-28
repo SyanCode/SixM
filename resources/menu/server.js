@@ -160,14 +160,25 @@ const profileMenu = (player) => {
       { type: 'separator', label: 'Préférences' },
       { id: 'noms', type: 'checkbox', label: 'Afficher les noms', value: p.noms, description: 'Noms des joueurs au-dessus de leur tête.' },
       { id: 'sons', type: 'checkbox', label: 'Sons des notifications', value: p.sons },
+      { type: 'separator', label: 'Avatar' },
+      { id: 'modele', type: 'list', label: 'Modèle 3D', icon: 'user', options: models().map(modelName), value: Math.max(0, models().indexOf(me.avatar.model)), description: 'Ce que les autres voient à votre place, dessiné par la surcouche de SixM.' },
+      { id: 'taille', type: 'slider', label: 'Taille', icon: 'target', min: 25, max: 300, step: 5, value: Math.round(me.avatar.scale * 100), right: `${Math.round(me.avatar.scale * 100)} %` },
+      { id: 'couleur', type: 'list', label: 'Couleur', icon: 'palette', options: AVATAR_COLORS.map(([, n]) => n), value: Math.max(0, AVATAR_COLORS.findIndex(([c]) => c === me.avatar.color)) },
     ],
   };
 };
+const AVATAR_COLORS = [[null, 'Par défaut'], ['#3e63dd', 'Bleu'], ['#e5484d', 'Rouge'], ['#30a46c', 'Vert'], ['#f5a524', 'Or'], ['#8e4ec6', 'Violet'], ['#f0f0f0', 'Blanc'], ['#202020', 'Noir']];
+const models = () => sixm.models();
+const modelName = (m) => (m === 'sixm:humain' ? 'Humain (par défaut)' : m.replace(/[_-]/g, ' ').replace(/^./, (c) => c.toUpperCase()));
 sixm.addMenu({ id: 'profil', label: 'Mon profil', icon: 'user', description: 'Votre identifiant et vos préférences.', open: profileMenu });
 sixm.onMenu('profil', (player, item, value) => {
   const p = prefsOf(player.id);
   if (item === 'noms' && typeof value === 'boolean') p.noms = value;
   if (item === 'sons' && typeof value === 'boolean') p.sons = value;
+  if (item === 'modele' && Number.isInteger(value) && models()[value]) sixm.setAvatar(player.id, { model: models()[value] });
+  if (item === 'taille' && Number.isFinite(value)) sixm.setAvatar(player.id, { scale: value / 100 });
+  if (item === 'couleur' && Number.isInteger(value) && AVATAR_COLORS[value]) sixm.setAvatar(player.id, { color: AVATAR_COLORS[value][0] });
+  if (['modele', 'taille', 'couleur'].includes(item)) sixm.openMenu(player.id, profileMenu(player));
 });
 
 // --- Mon jeu (admins) : ce que le profil local de chacun permet (no clip, téléportation…) --------------

@@ -105,3 +105,20 @@ Le mod `menu` en fait « Recherche mémoire » pour les admins.
 `sixm.getPlayer(id)` donne aussi `located` (position connue) et `game` (ce que son jeu permet). Le mod `menu` s'en sert
 pour « Mon jeu » (no clip, valeurs du profil, aller vers un joueur) et, dans l'administration, « Aller vers lui » et
 « L'amener ici ». Réservez ces actions aux admins : un serveur qui donne le no clip à tous permet de tricher.
+
+## Avatars 3D
+La surcouche dessine chaque joueur avec un modèle 3D, à sa position et selon son cap, avec la caméra du jeu (il faut
+donc une position et une caméra dans le profil local). Ce n'est pas un personnage du jeu : il n'a pas de collision
+et reste visible à travers les murs. Les noms sont affichés au-dessus. Au-delà de 300 m, seul le nom reste.
+
+Un mod fournit des modèles Wavefront OBJ (`resource.json` : `"models": ["models/robot.obj"]`, ou `{ "name", "file" }`).
+Unités : mètres, z vers le haut, l'origine au centre du joueur, l'avant vers +y. `usemtl #rrggbb` donne une couleur aux
+faces qui suivent ; sans couleur, elles prennent celle du joueur. 4 000 sommets et 6 000 triangles au plus par
+modèle, 32 modèles par serveur. Le mod `avatars` en donne un exemple ; `sixm:humain` est le modèle par défaut.
+```js
+sixm.models()                                   // ['sixm:humain', 'robot']
+sixm.setAvatar(id, { model: 'robot', scale: 1.5, color: '#e5484d' })   // échelle de 0,1 à 10
+sixm.getPlayer(id).avatar
+```
+Le mod `menu` le propose dans « Mon profil » : modèle, taille, couleur.
+
