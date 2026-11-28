@@ -92,7 +92,7 @@ export class Launcher {
       const s = net.createServer().once('error', reject).listen(0, '127.0.0.1', () => { const { port: p } = s.address(); s.close(() => resolve(p)); });
     });
     fs.mkdirSync(this.profiles, { recursive: true });
-    if (this.status !== 'running') this.bridge = { port, token: crypto.randomBytes(24).toString('hex') };
+    if (this.status !== 'running') this.bridge = { port, token: crypto.randomBytes(24).toString('hex'), profiles: this.profiles };
   }
 
   /** extraEnv : réglages du portage (variables VICTORY_…) ; argsFor(exe, console) : sa ligne de commande. */

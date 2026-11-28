@@ -11,7 +11,72 @@ unsafe extern "system" {
     fn K32EnumProcessModules(process: *mut c_void, modules: *mut *mut c_void, bytes: u32, needed: *mut u32) -> i32;
     fn GetModuleFileNameW(module: *mut c_void, name: *mut u16, size: u32) -> u32;
     fn GetCurrentThread() -> *mut c_void;
+    fn VirtualQuery(address: *const c_void, info: *mut MemoryInfo, size: usize) -> usize;
     fn SetThreadPriority(thread: *mut c_void, priority: i32) -> i32;
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct MemoryInfo {
+    base: usize,
+    allocation_base: usize,
+    allocation_protect: u32,
+    partition: u16,
+    region_size: usize,
+    state: u32,
+    protect: u32,
+    kind: u32,
+}
+
+const MEM_COMMIT: u32 = 0x1000;
+/// PAGE_READWRITE, PAGE_WRITECOPY, PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY.
+const WRITABLE: u32 = 0x04 | 0x08 | 0x40 | 0x80;
+/// PAGE_NOACCESS, PAGE_GUARD.
+const NO_READ: u32 = 0x01 | 0x100;
+
+fn query(address: u64) -> Option<MemoryInfo> {
+    let mut info = MemoryInfo::default();
+    // SAFETY: VirtualQuery only fills `info`, of the size passed, for any address.
+    let n = unsafe { VirtualQuery(address as *const c_void, &mut info, std::mem::size_of::<MemoryInfo>()) };
+    (n != 0).then_some(info)
+}
+
+fn writable_page(i: &MemoryInfo) -> bool {
+    i.state == MEM_COMMIT && i.protect & WRITABLE != 0 && i.protect & NO_READ == 0
+}
+
+/// Committed, readable and writable regions of this process, `(start, end)`, in order: where the title
+/// keeps what changes. Code and read-only data are left out.
+pub fn writable_regions() -> Vec<(u64, u64)> {
+    let mut out: Vec<(u64, u64)> = Vec::new();
+    let mut at = 0x10000u64;
+    while at < 0x7fff_ffff_0000 {
+        let Some(i) = query(at) else { break };
+        let (start, size) = (i.base as u64, i.region_size as u64);
+        if size == 0 {
+            break;
+        }
+        if writable_page(&i) {
+            match out.last_mut() {
+                Some(last) if last.1 == start => last.1 = start + size,
+                _ => out.push((start, start + size)),
+            }
+        }
+        at = start + size;
+    }
+    out
+}
+
+/// This process's memory for a search.
+pub struct Process;
+
+impl crate::scan::Space for Process {
+    fn regions(&self) -> Vec<(u64, u64)> {
+        writable_regions()
+    }
+    fn read(&self, at: u64, buf: &mut [u8]) -> bool {
+        read(at, buf)
+    }
 }
 
 /// This thread below normal priority, so the title's threads always come first.
@@ -37,6 +102,15 @@ fn read_u32(address: u64) -> Option<u32> {
 /// Writes `data` at `address`, or returns false if any byte could not be written (the page is not
 /// writable, or not mapped). Never changes a page's protection.
 pub fn write(address: u64, data: &[u8]) -> bool {
+    // WriteProcessMemory would make a read-only page writable for the call: we never do.
+    let Some(end) = address.checked_add(data.len() as u64) else { return false };
+    let mut at = address;
+    while at < end {
+        match query(at) {
+            Some(i) if writable_page(&i) && i.region_size > 0 => at = i.base as u64 + i.region_size as u64,
+            _ => return false,
+        }
+    }
     let mut done = 0;
     // SAFETY: the kernel checks the destination range and reports an error; `data` is ours for its length.
     let ok = unsafe { WriteProcessMemory(GetCurrentProcess(), address as *mut c_void, data.as_ptr().cast(), data.len(), &mut done) };
@@ -73,6 +147,8 @@ pub fn floats<const N: usize>(base: u64, chain: &[u64]) -> Option<[f32; N]> {
 
 pub struct Module {
     pub base: u64,
+    /// SizeOfImage: the image is `base .. base + size`.
+    pub size: u64,
     pub path: String,
     /// `TimeDateStamp-SizeOfImage` in lowercase hex, as symbol servers name a build.
     pub build: String,
@@ -100,8 +176,9 @@ fn describe(handle: *mut c_void) -> Option<Module> {
     if read_u32(pe)? != 0x4550 {
         return None;
     }
-    let build = format!("{:x}-{:x}", read_u32(pe + 8)?, read_u32(pe + 0x50)?);
-    Some(Module { base, path, build })
+    let size = read_u32(pe + 0x50)?;
+    let build = format!("{:x}-{:x}", read_u32(pe + 8)?, size);
+    Some(Module { base, size: u64::from(size), path, build })
 }
 
 #[cfg(test)]
@@ -130,6 +207,12 @@ mod tests {
         assert!(write(at, &2.5f32.to_le_bytes()));
         assert_eq!(data, [0.0, 2.5, 0.0]);
         assert!(!write(8, &[1]), "unmapped");
+        static READ_ONLY: [u8; 4] = [1, 2, 3, 4];
+        assert!(!write(READ_ONLY.as_ptr() as u64, &[9]), "read-only page left alone");
+        assert_eq!(READ_ONLY, [1, 2, 3, 4]);
+        let regions = writable_regions();
+        assert!(regions.iter().any(|&(a, b)| (a..b).contains(&(data.as_ptr() as u64))), "the stack is writable");
+        assert!(!regions.iter().any(|&(a, b)| (a..b).contains(&(READ_ONLY.as_ptr() as u64))));
         assert_eq!(resolve(0, &[0]), None);
     }
 

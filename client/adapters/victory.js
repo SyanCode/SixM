@@ -125,6 +125,8 @@ export class VictoryAdapter extends GameAdapter {
   useModule(module) {
     this.module = module;
     module.onResult = (r) => this.onResult?.(r);
+    module.onScan = (s) => this.onScan?.(s);
+    module.onPointers = (p) => this.onPointers?.(p);
     module.onCamera = (m) => {
       const p = module.position;
       this.#send({ t: 'view', m, ...(p && { x: p.x, y: p.y, z: p.z }) });

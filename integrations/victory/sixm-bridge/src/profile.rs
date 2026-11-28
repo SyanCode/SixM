@@ -36,6 +36,31 @@ impl Kind {
         }
     }
 
+    pub fn size(self) -> usize {
+        match self {
+            Kind::U8 => 1,
+            Kind::I32 | Kind::F32 => 4,
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Kind> {
+        match name {
+            "u8" => Some(Kind::U8),
+            "i32" => Some(Kind::I32),
+            "f32" => Some(Kind::F32),
+            _ => None,
+        }
+    }
+
+    /// The value of the first `size()` bytes of `b`.
+    pub fn decode(self, b: &[u8]) -> f64 {
+        match self {
+            Kind::U8 => f64::from(b[0]),
+            Kind::I32 => f64::from(i32::from_le_bytes([b[0], b[1], b[2], b[3]])),
+            Kind::F32 => f64::from(f32::from_le_bytes([b[0], b[1], b[2], b[3]])),
+        }
+    }
+
     /// The bytes of `v` for this type, or None when it does not fit.
     pub fn bytes(self, v: f64) -> Option<Vec<u8>> {
         if !v.is_finite() {
@@ -110,12 +135,7 @@ pub fn parse(text: &str) -> Result<Profile, String> {
                     return Err(at(&format!("at most {MAX_VALUES} values")));
                 }
                 let (kind, rest) = value.split_once(',').ok_or_else(|| at("expected a type, then the chain"))?;
-                let kind = match kind.trim() {
-                    "u8" => Kind::U8,
-                    "i32" => Kind::I32,
-                    "f32" => Kind::F32,
-                    _ => return Err(at("the type is u8, i32 or f32")),
-                };
+                let kind = Kind::parse(kind.trim()).ok_or_else(|| at("the type is u8, i32 or f32"))?;
                 values.push(Value { name: name.to_owned(), kind, chain: chain(rest).map_err(|m| at(&m))? });
             }
             other => return Err(at(&format!("unknown key {other}"))),

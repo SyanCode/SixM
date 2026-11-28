@@ -120,7 +120,7 @@ export class MenuHub {
       const at = main.items.findIndex((i) => i.id === o.entry);
       if (at >= 0) {
         main.items[at] = { ...main.items[at], type: 'submenu', menu: clean };
-        return this.net.sendToPlayer(player.id, { t: 'menu', menu: cleanMenu({ ...main, open: [o.entry] }) });
+        return this.net.sendToPlayer(player.id, { t: 'menu', menu: cleanMenu({ ...main, open: [o.entry, ...(clean.open ?? [])] }) });
       }
     }
     this.opened.delete(player.id);

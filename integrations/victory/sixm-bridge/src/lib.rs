@@ -21,6 +21,7 @@
 #[cfg(windows)]
 mod memory;
 pub mod orders;
+pub mod scan;
 pub mod profile;
 
 /// Call once, early. Does nothing without SixM's environment.
@@ -52,24 +53,26 @@ mod server {
             return;
         }
         let profiles = std::env::var_os("SIXM_PROFILES").map(PathBuf::from);
+        // The memory search, only when the player turned it on in SixM (off by default).
+        let scanner = std::env::var("SIXM_SCANNER").is_ok_and(|v| v == "1");
         // A small stack, below the title's threads: the module must never cost the game a frame.
         let _ = std::thread::Builder::new().name("sixm-bridge".into()).stack_size(256 << 10).spawn(move || {
             memory::lower_priority();
             match TcpListener::bind((Ipv4Addr::LOCALHOST, port)) {
-                Ok(listener) => serve(&listener, &token, profiles.as_deref()),
+                Ok(listener) => serve(&listener, &token, profiles.as_deref(), scanner),
                 Err(e) => eprintln!("sixm-bridge: port {port}: {e}"),
             }
         });
     }
 
     /// One client at a time.
-    pub fn serve(listener: &TcpListener, token: &str, profiles: Option<&Path>) {
+    pub fn serve(listener: &TcpListener, token: &str, profiles: Option<&Path>, scanner: bool) {
         for stream in listener.incoming().flatten() {
-            let _ = client(stream, token, profiles);
+            let _ = client(stream, token, profiles, scanner);
         }
     }
 
-    fn client(mut stream: TcpStream, token: &str, profiles: Option<&Path>) -> std::io::Result<()> {
+    fn client(mut stream: TcpStream, token: &str, profiles: Option<&Path>, scanner: bool) -> std::io::Result<()> {
         stream.set_nodelay(true)?;
         stream.set_read_timeout(Some(Duration::from_secs(2)))?;
         stream.set_write_timeout(Some(Duration::from_secs(2)))?;
@@ -79,14 +82,16 @@ mod server {
             return Ok(());
         }
         let orders = read_orders(&stream)?;
+        let (jobs, found) = if scanner { search::start() } else { search::none() };
         let mut held: HashMap<String, Vec<u8>> = HashMap::new();
+        let mut poked: HashMap<u64, Vec<u8>> = HashMap::new(); // addresses held by the search
         let mut title: Option<Title> = None;
         let mut announced = None;
         for tick in 0u64.. {
             // Titles map their image late, and a profile may be written while playing.
             if tick % 60 == 0 {
                 title = find_title(profiles);
-                let now = title.as_ref().map(|t| (t.build.clone(), t.profile.is_some(), t.error.clone(), abilities(t.profile.as_ref())));
+                let now = title.as_ref().map(|t| (t.build.clone(), t.profile.is_some(), t.error.clone(), abilities(t.profile.as_ref(), scanner)));
                 if now != announced {
                     if let Some((build, ok, error, can)) = &now {
                         let error = error.as_deref().map_or("null".into(), json);
@@ -100,12 +105,30 @@ mod server {
             }
             let target = title.as_ref().and_then(|t| Some((t.base, t.profile.as_ref()?)));
             for order in orders.try_iter().take(MAX_ORDERS) {
-                let (what, done) = match target {
-                    Some((base, p)) => apply(&order, base, p, &mut held),
-                    None => (order.what(), Err("no profile for this build".to_owned())),
+                let (what, done) = if order.scanner() {
+                    let image = title.as_ref().map(|t| (t.base, t.end));
+                    (order.what(), search::order(order, scanner, image, &jobs, &mut poked))
+                } else {
+                    match target {
+                        Some((base, p)) => apply(&order, base, p, &mut held),
+                        None => (order.what(), Err("no profile for this build".to_owned())),
+                    }
                 };
+                // Searches answer on their own, when done.
+                if what == "scan" || what == "pointers" {
+                    if let Err(e) = done {
+                        writeln!(stream, r#"{{"t":"did","what":{},"ok":false,"error":{}}}"#, json(&what), json(&e))?;
+                    }
+                    continue;
+                }
                 let error = done.as_ref().err().map_or("null".into(), |e| json(e));
                 writeln!(stream, r#"{{"t":"did","what":{},"ok":{},"error":{error}}}"#, json(&what), done.is_ok())?;
+            }
+            for line in found.try_iter() {
+                writeln!(stream, "{line}")?;
+            }
+            for (at, bytes) in &poked {
+                memory::write(*at, bytes);
             }
             if let Some((base, p)) = target {
                 for v in &p.values {
@@ -135,11 +158,11 @@ mod server {
     }
 
     /// What the profile lets SixM change, as `ready` gives it.
-    fn abilities(p: Option<&profile::Profile>) -> String {
+    fn abilities(p: Option<&profile::Profile>, scanner: bool) -> String {
         let values: Vec<String> = p.map_or(Vec::new(), |p| {
             p.values.iter().map(|v| format!(r#"{{"name":{},"type":"{}"}}"#, json(&v.name), v.kind.name())).collect()
         });
-        format!(r#""teleport":{},"values":[{}]"#, p.is_some_and(|p| p.teleport), values.join(","))
+        format!(r#""teleport":{},"values":[{}],"scanner":{scanner}"#, p.is_some_and(|p| p.teleport), values.join(","))
     }
 
     /// Carries out an order through the profile.
@@ -181,6 +204,7 @@ mod server {
                 held.remove(name);
                 Ok(())
             }
+            _ => Err("a search order".to_owned()),
         };
         (order.what(), done)
     }
@@ -213,8 +237,130 @@ mod server {
         Ok(rx)
     }
 
+    /// The memory search: a thread of its own, so that a long search never holds the frames back.
+    mod search {
+        use super::{json, memory};
+        use crate::orders::Order;
+        use crate::profile::Kind;
+        use crate::scan::{pointer_paths, Scan, Test};
+        use std::collections::HashMap;
+        use std::sync::mpsc::{self, Receiver, SyncSender};
+        use std::time::{Duration, Instant};
+
+        pub enum Job {
+            Scan { first: bool, kind: Kind, test: Test },
+            Pointers { address: u64, image: (u64, u64) },
+        }
+
+        const SHOWN: usize = 30;
+
+        pub fn none() -> (Option<SyncSender<Job>>, Receiver<String>) {
+            (None, mpsc::channel().1)
+        }
+
+        pub fn start() -> (Option<SyncSender<Job>>, Receiver<String>) {
+            let (jobs, todo) = mpsc::sync_channel::<Job>(4);
+            let (tell, found) = mpsc::channel::<String>();
+            let _ = std::thread::Builder::new().name("sixm-bridge-search".into()).stack_size(256 << 10).spawn(move || {
+                memory::lower_priority();
+                let space = memory::Process;
+                let mut scan: Option<Scan> = None;
+                for job in todo {
+                    match job {
+                        Job::Scan { first, kind, test } => {
+                            let mut last = Instant::now();
+                            let _ = tell.send(r#"{"t":"scan","busy":true,"progress":0}"#.to_owned());
+                            let mut progress = |done: u64, total: u64| {
+                                if last.elapsed() > Duration::from_millis(500) {
+                                    last = Instant::now();
+                                    let p = if total == 0 { 0.0 } else { done as f64 / total as f64 };
+                                    let _ = tell.send(format!(r#"{{"t":"scan","busy":true,"progress":{p:.3}}}"#));
+                                }
+                                std::thread::yield_now();
+                                true
+                            };
+                            let done = if first {
+                                Scan::first(&space, kind, test, &mut progress).map(|s| scan = Some(s))
+                            } else {
+                                match scan.as_mut() {
+                                    Some(s) if s.kind == kind => s.next(&space, test, &mut progress),
+                                    Some(_) => Err("the last search was for another type: start a new one".into()),
+                                    None => Err("no search yet: start one with a value".into()),
+                                }
+                            };
+                            let error = done.err();
+                            if error.as_deref().is_some_and(|e| e.starts_with("more than")) {
+                                scan = None;
+                            }
+                            let results: Vec<String> = scan.as_ref().map_or(Vec::new(), |s| {
+                                s.sample(&space, SHOWN)
+                                    .iter()
+                                    .map(|(a, v)| format!(r#"{{"a":{a},"v":{}}}"#, if v.is_finite() { v.to_string() } else { "null".into() }))
+                                    .collect()
+                            });
+                            let (count, kind) = scan.as_ref().map_or((0, kind), |s| (s.count(), s.kind));
+                            let error = error.as_deref().map_or("null".into(), json);
+                            let _ = tell.send(format!(
+                                r#"{{"t":"scan","busy":false,"type":"{}","count":{count},"results":[{}],"error":{error}}}"#,
+                                kind.name(),
+                                results.join(",")
+                            ));
+                        }
+                        Job::Pointers { address, image } => {
+                            let chains: Vec<String> = pointer_paths(&space, image, address, 0x1000, 12)
+                                .iter()
+                                .map(|c| format!("[{}]", c.iter().map(u64::to_string).collect::<Vec<_>>().join(",")))
+                                .collect();
+                            let _ = tell.send(format!(r#"{{"t":"pointers","address":{address},"chains":[{}]}}"#, chains.join(",")));
+                        }
+                    }
+                }
+            });
+            (Some(jobs), found)
+        }
+
+        /// A search order: to the search thread, or a write at an address it found.
+        pub fn order(
+            order: Order,
+            on: bool,
+            image: Option<(u64, u64)>,
+            jobs: &Option<SyncSender<Job>>,
+            poked: &mut HashMap<u64, Vec<u8>>,
+        ) -> Result<(), String> {
+            let (true, Some(jobs)) = (on, jobs) else {
+                return Err("the memory search is off: turn it on in SixM's settings, then start the game again".into());
+            };
+            let busy = |_| "a search is already running".to_owned();
+            match order {
+                Order::Scan { first, kind, test } => jobs.try_send(Job::Scan { first, kind, test }).map_err(busy),
+                Order::Pointers { address } => {
+                    let image = image.ok_or("the title's image is not mapped yet")?;
+                    jobs.try_send(Job::Pointers { address, image }).map_err(busy)
+                }
+                Order::Poke { address, kind, value, hold } => {
+                    let bytes = kind.bytes(value).ok_or(format!("{value} does not fit in {}", kind.name()))?;
+                    if !memory::write(address, &bytes) {
+                        return Err("this address cannot be written".into());
+                    }
+                    if hold {
+                        poked.insert(address, bytes);
+                    } else {
+                        poked.remove(&address);
+                    }
+                    Ok(())
+                }
+                Order::Unpoke { address } => {
+                    poked.remove(&address);
+                    Ok(())
+                }
+                _ => Err("not a search order".into()),
+            }
+        }
+    }
+
     struct Title {
         base: u64,
+        end: u64,
         build: String,
         profile: Option<profile::Profile>,
         error: Option<String>,
@@ -231,13 +377,13 @@ mod server {
                 Ok(p) => (None, Some(format!("the profile is for build {}", p.build))),
                 Err(e) => (None, Some(e)),
             };
-            return Some(Title { base: m.base, build: m.build.clone(), profile, error });
+            return Some(Title { base: m.base, end: m.base + m.size, build: m.build.clone(), profile, error });
         }
         let m = modules.into_iter().find(|m| {
             let p = m.path.to_lowercase();
             p.ends_with(".exe") && p.contains("\\images\\")
         })?;
-        Some(Title { base: m.base, build: m.build, profile: None, error: None })
+        Some(Title { base: m.base, end: m.base + m.size, build: m.build, profile: None, error: None })
     }
 
     fn read_limited(file: &Path) -> Option<String> {
@@ -280,7 +426,7 @@ mod server {
         fn run(profiles: Option<PathBuf>) -> u16 {
             let l = TcpListener::bind("127.0.0.1:0").unwrap();
             let port = l.local_addr().unwrap().port();
-            std::thread::spawn(move || serve(&l, TOKEN, profiles.as_deref()));
+            std::thread::spawn(move || serve(&l, TOKEN, profiles.as_deref(), false));
             port
         }
 
@@ -301,7 +447,7 @@ mod server {
             let file = dir.join(format!("{}.profile", me.build));
             std::fs::write(&file, format!("build = {}\nposition = {:#x}\ncamera = {:#x}\ncamera_order = column\n", me.build, rva(POS.as_ptr()), rva(CAM.as_ptr()))).unwrap();
             let out = lines(run(Some(dir.clone())), &format!("{TOKEN}\n"), 4);
-            assert_eq!(out[0], format!(r#"{{"t":"ready","build":"{}","profile":true,"error":null,"teleport":false,"values":[]}}"#, me.build));
+            assert_eq!(out[0], format!(r#"{{"t":"ready","build":"{}","profile":true,"error":null,"teleport":false,"values":[],"scanner":false}}"#, me.build));
             assert_eq!(out[1], r#"{"t":"localPlayer","x":10,"y":-20.5,"z":30,"h":0}"#);
             assert_eq!(out[2], r#"{"t":"camera","m":[1,5,9,13,2,6,10,14,3,7,11,15,4,8,12,16]}"#);
 
@@ -327,7 +473,7 @@ mod server {
             s.write_all(format!("{TOKEN}\n").as_bytes()).unwrap();
             let mut lines = BufReader::new(s.try_clone().unwrap()).lines().map_while(Result::ok);
             let ready = lines.next().unwrap();
-            assert!(ready.ends_with(r#""teleport":true,"values":[{"name":"flag","type":"u8"}]}"#), "{ready}");
+            assert!(ready.ends_with(r#""teleport":true,"values":[{"name":"flag","type":"u8"}],"scanner":false}"#), "{ready}");
             s.write_all(b"{\"t\":\"teleport\",\"x\":1,\"y\":2,\"z\":3}\n{\"t\":\"set\",\"name\":\"flag\",\"value\":7,\"hold\":true}\n{\"t\":\"set\",\"name\":\"nope\",\"value\":1}\n{\"t\":\"set\",\"name\":\"flag\",\"value\":300}\n").unwrap();
             let did: Vec<String> = lines.filter(|l| l.contains(r#""t":"did""#)).take(4).collect();
             assert_eq!(did[0], r#"{"t":"did","what":"teleport","ok":true,"error":null}"#);
@@ -342,6 +488,46 @@ mod server {
             std::thread::sleep(Duration::from_millis(200));
             assert_eq!(WRITABLE[3].load(Relaxed) & 0xff, 7);
             std::fs::remove_dir_all(dir).unwrap();
+        }
+
+        static SEARCHED: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+        #[test]
+        fn searches_memory_when_turned_on() {
+            use std::sync::atomic::Ordering::Relaxed;
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = l.local_addr().unwrap().port();
+            std::thread::spawn(move || serve(&l, TOKEN, None, true));
+            SEARCHED.store(-73_421_901, Relaxed);
+            let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            s.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
+            s.write_all(format!("{TOKEN}\n").as_bytes()).unwrap();
+            let mut lines = BufReader::new(s.try_clone().unwrap()).lines().map_while(Result::ok);
+            let mut answer = |s: &mut TcpStream, order: &str, start: &str| {
+                s.write_all(format!("{order}\n").as_bytes()).unwrap();
+                lines.by_ref().find(|l| l.starts_with(start) && !l.contains(r#""busy":true"#)).unwrap()
+            };
+            let first = answer(&mut s, r#"{"t":"scan","kind":"first","type":"i32","test":"exact","a":-73421901}"#, r#"{"t":"scan""#);
+            let at = SEARCHED.as_ptr() as u64;
+            assert!(first.contains(&format!(r#"{{"a":{at},"v":-73421901}}"#)), "{first}");
+            SEARCHED.store(-73_421_000, Relaxed);
+            let next = answer(&mut s, r#"{"t":"scan","kind":"next","type":"i32","test":"increased"}"#, r#"{"t":"scan""#);
+            assert!(next.contains(r#""count":1,"#) && next.contains(&format!(r#""a":{at}"#)), "{next}");
+            let poke = answer(&mut s, &format!(r#"{{"t":"poke","address":{at},"type":"i32","value":5}}"#), r#"{"t":"did""#);
+            assert!(poke.contains(r#""ok":true"#), "{poke}");
+            assert_eq!(SEARCHED.load(Relaxed), 5);
+            let ro = answer(&mut s, &format!(r#"{{"t":"poke","address":{},"type":"u8","value":5}}"#, TOKEN.as_ptr() as u64), r#"{"t":"did""#);
+            assert!(ro.contains("cannot be written"), "read-only data left alone: {ro}");
+        }
+
+        #[test]
+        fn search_is_off_unless_turned_on() {
+            let port = run(None);
+            let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            s.write_all(format!("{TOKEN}\n{{\"t\":\"poke\",\"address\":{},\"type\":\"i32\",\"value\":1}}\n", SEARCHED.as_ptr() as u64).as_bytes()).unwrap();
+            let did = BufReader::new(s).lines().map_while(Result::ok).find(|l| l.contains(r#""t":"did""#)).unwrap();
+            assert!(did.contains("memory search is off"), "{did}");
         }
 
         #[test]

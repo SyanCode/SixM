@@ -1,5 +1,33 @@
+import fs from 'node:fs';
 import net from 'node:net';
-import { cleanAbilities, cleanAction, cleanResult, NO_ABILITIES } from '../server/game.js';
+import path from 'node:path';
+import { cleanAbilities, cleanAction, cleanPointers, cleanResult, cleanScan, NO_ABILITIES } from '../server/game.js';
+
+/**
+ * Ajoute ou remplace une ligne du profil local `<dir>/<build>.profile` (format : sixm-bridge/src/profile.rs).
+ * Le reste du fichier est gardé ; le module le relit pendant la partie.
+ */
+export function writeProfile(dir, build, entry) {
+  if (!/^[0-9a-f]{1,8}-[0-9a-f]{1,8}$/.test(build ?? '')) throw new Error('version du jeu inconnue');
+  const file = path.join(dir, `${build}.profile`);
+  let lines = [];
+  try { lines = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '').replace(/\s+$/, '').split(/\r?\n/); } catch { /* nouveau profil */ }
+  if (lines.length === 1 && !lines[0]) lines = [];
+  const hex = (n) => `0x${n.toString(16)}`;
+  const set = (key, value) => {
+    const i = lines.findIndex((l) => l.split('#')[0].split('=')[0].trim() === key);
+    const line = `${key} = ${value}`;
+    if (i >= 0) lines[i] = line; else lines.push(line);
+  };
+  if (!lines.some((l) => /^\s*build\s*=/.test(l))) lines.unshift(`build = ${build}`, '# Écrit par SixM (recherche mémoire) ; modifiable à la main.');
+  if (entry.key === 'position') {
+    set('position', entry.chain.map(hex).join(', '));
+    if (entry.teleport) set('teleport', 'on');
+  } else set(`value.${entry.name}`, `${entry.type}, ${entry.chain.map(hex).join(', ')}`);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(file, lines.join('\n') + '\n');
+  return file;
+}
 
 const MAX_LINE = 64 << 10;
 const STALE_MS = 2000;
@@ -11,8 +39,8 @@ const finite = (list, n) => Array.isArray(list) && list.length === n && list.eve
  * Se reconnecte tant que le jeu tourne.
  */
 export class GameModule {
-  constructor({ port, token, retryMs = 1000, onCamera = () => {}, onResult = () => {} }) {
-    Object.assign(this, { port, token, retryMs, onCamera, onResult });
+  constructor({ port, token, profiles = null, retryMs = 1000, onCamera = () => {}, onResult = () => {}, onScan = () => {}, onPointers = () => {} }) {
+    Object.assign(this, { port, token, profiles, retryMs, onCamera, onResult, onScan, onPointers });
     this.abilities = NO_ABILITIES;
     this.connected = false;
     this.build = null;
@@ -35,9 +63,23 @@ export class GameModule {
   /** Action sur le jeu (forme : server/game.js) ; le module répond par `onResult`. Faux si pas connecté. */
   act(action) {
     const a = cleanAction(action);
+    if (a.action === 'saveProfile') {
+      // Écrit ici, dans le profil de ce PC : le module ne fait que le relire.
+      if (!this.abilities.scanner || !this.profiles) return false;
+      try {
+        writeProfile(this.profiles, this.build, a);
+        queueMicrotask(() => this.onResult({ what: 'profile', ok: true, error: null }));
+      } catch (e) {
+        queueMicrotask(() => this.onResult({ what: 'profile', ok: false, error: e.message }));
+      }
+      return true;
+    }
     if (!this.connected || this.sock?.destroyed) return false;
     const line = a.action === 'teleport' ? { t: 'teleport', x: a.x, y: a.y, z: a.z, ...(a.h !== undefined && { h: a.h }) }
-      : a.action === 'set' ? { t: 'set', name: a.name, value: a.value, hold: a.hold } : { t: 'release', name: a.name };
+      : a.action === 'set' ? { t: 'set', name: a.name, value: a.value, hold: a.hold }
+        : a.action === 'release' ? { t: 'release', name: a.name }
+          : a.action === 'scan' ? { t: 'scan', kind: a.first ? 'first' : 'next', type: a.type, test: a.test, ...(a.a !== undefined && { a: a.a }), ...(a.b !== undefined && { b: a.b }) }
+            : { t: a.action, ...a, action: undefined };
     this.sock.write(JSON.stringify(line) + '\n');
     return true;
   }
@@ -85,5 +127,7 @@ export class GameModule {
       this.seen = performance.now();
     } else if (m.t === 'camera' && finite(m.m, 16)) this.onCamera(m.m);
     else if (m.t === 'did') this.onResult(cleanResult(m));
+    else if (m.t === 'scan') this.onScan(cleanScan(m));
+    else if (m.t === 'pointers') this.onPointers(cleanPointers(m));
   }
 }

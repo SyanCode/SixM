@@ -22,7 +22,7 @@ const page = (menu) => {
 
 test('actions sur le jeu : validées, et seulement ce que le jeu annonce', () => {
   assert.deepEqual(cleanAbilities({ teleport: 1, values: [{ name: 'noclip', type: 'u8' }, { name: 'noclip', type: 'u8' }, { name: 'X', type: 'u8' }, { name: 'a', type: 'u64' }] }),
-    { teleport: false, values: [{ name: 'noclip', type: 'u8' }] });
+    { teleport: false, values: [{ name: 'noclip', type: 'u8' }], scanner: false });
   assert.deepEqual(cleanAction({ action: 'set', name: 'noclip', value: true, hold: true }), { action: 'set', name: 'noclip', value: 1, hold: true });
   assert.deepEqual(cleanAction({ action: 'teleport', x: 1, y: 2, z: 3, h: 'nord' }), { action: 'teleport', x: 1, y: 2, z: 3 });
   for (const bad of [{ action: 'teleport', x: 1, y: 2, z: 1e7 }, { action: 'set', name: '../x', value: 1 }, { action: 'set', name: 'x', value: 'beaucoup' }, { action: 'write', address: 4096 }, null])
@@ -45,7 +45,7 @@ test('menus branchés sur le jeu : no clip, téléportation, refus du jeu sans p
   const view = (c) => [...srv.world.players.values()].find((p) => p.id === c.id);
   await until(() => view(ca)?.game?.teleport && view(cb)?.located && view(cc)?.game, 'capacités reçues');
   assert.deepEqual(view(ca).game.values.map((v) => v.name), ['noclip', 'invincible']);
-  assert.deepEqual(view(cc).game, { teleport: false, values: [] });
+  assert.deepEqual(view(cc).game, { teleport: false, values: [], scanner: false });
 
   // Joueur ordinaire : pas d'entrée « Mon jeu », et un choix forgé est ignoré.
   ca.openMenu();
@@ -74,4 +74,67 @@ test('menus branchés sur le jeu : no clip, téléportation, refus du jeu sans p
   // Le jeu de Cid ne permet rien : le serveur ne lui envoie rien.
   ca.selectMenu('admin:joueur', `bring:${cc.id}`);
   await until(() => ca.notices.some((n) => /ne permet pas la téléportation/.test(n.text)), 'refus signalé');
+});
+
+test('recherche mémoire depuis le menu : chercher, affiner, écrire, chemin, profil ; seulement si activée', async (t) => {
+  const srv = await createServer({ name: 't', port: 0, tickRate: 50, resourcesDir: 'resources', autostart: ['menu'] });
+  const me = createIdentity();
+  const a = new MockAdapter();
+  const c = new SixMClient({ url: `ws://localhost:${srv.net.port}`, name: 'Ana', adapter: a, identity: me, posIntervalMs: 20 });
+  t.after(async () => { await c.disconnect(); await srv.stop(); });
+  await c.connect();
+  srv.access.setAdmin(playerUid(me.publicKey), 'Ana', true);
+  const view = () => [...srv.world.players.values()][0];
+  await until(() => view()?.game?.scanner, 'recherche annoncée');
+  c.openMenu();
+  await until(() => c.menu?.items.some((i) => i.id === 'scan'), 'entrée visible');
+  c.selectMenu('sixm:main', 'scan');
+  await until(() => page(c.menu)?.id === 'scan', 'menu de recherche');
+
+  c.selectMenu('scan', 'type', 1); // entier
+  await until(() => page(c.menu)?.items.find((i) => i.id === 'type')?.value === 1, 'type choisi');
+  c.selectMenu('scan', 'new:exact', '200');
+  await until(() => /^2 résultat/.test(page(c.menu)?.items.find((i) => i.id === 'statut')?.label), 'deux résultats');
+  a.health = 150;
+  c.selectMenu('scan', 'next:decreased');
+  await until(() => /^1 résultat/.test(page(c.menu)?.items.find((i) => i.id === 'statut')?.label), 'un seul a diminué');
+  const hit = page(c.menu).items.find((i) => i.id.startsWith('r:'));
+  assert.deepEqual([hit.label, hit.right], ['0x200000040', '150']);
+
+  const addr = hit.id.slice(2);
+  c.selectMenu('scan:adresse', `set:${addr}`, '999');
+  await until(() => a.health === 999, 'valeur écrite dans le jeu');
+  c.selectMenu('scan:adresse', `ptr:${addr}`);
+  const scanRoot = () => c.menu?.items.find((i) => i.id === 'scan')?.menu;
+  await until(() => scanRoot()?.items.find((i) => i.id === `r:${addr}`)?.menu.items.some((i) => i.id.startsWith('c:')), 'chemin trouvé');
+  assert.equal(page(c.menu).id, 'scan:adresse', 'le joueur reste sur l\'adresse');
+  c.selectMenu('scan:chemin', `val:${addr}:0`, 'Vie!');
+  await until(() => c.notices.some((n) => /un nom en minuscules/.test(n.text)), 'nom refusé');
+  c.selectMenu('scan:chemin', `val:${addr}:0`, 'vie');
+  await until(() => a.profile.length === 1, 'enregistré dans le profil');
+  assert.deepEqual(a.profile[0], { action: 'saveProfile', key: 'value', name: 'vie', type: 'i32', chain: [0x2a3f10, 0x18, 0x40] });
+  await until(() => c.notices.some((n) => n.title === 'Profil enregistré'), 'confirmation');
+
+  // Désactivée dans SixM : l'entrée disparaît et le serveur ne peut plus rien demander.
+  a.scanner = false;
+  await until(() => view().game.scanner === false, 'désactivée');
+  c.openMenu();
+  await until(() => c.menu?.id === 'sixm:main' && !c.menu.items.some((i) => i.id === 'scan'), 'entrée cachée');
+});
+
+test('profil local écrit par la recherche : lignes ajoutées ou remplacées, le reste gardé', async () => {
+  const { writeProfile } = await import('../client/module.js');
+  const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sixm-prof-'));
+  try {
+    const file = writeProfile(dir, 'abc-123', { key: 'position', chain: [0x1000, 0x20, 0x90], teleport: true });
+    writeProfile(dir, 'abc-123', { key: 'value', name: 'noclip', type: 'u8', chain: [0x3000, 0x18] });
+    fs.appendFileSync(file, 'camera = 0x2000 # à la main\n');
+    writeProfile(dir, 'abc-123', { key: 'position', chain: [0x1008, 0x20], teleport: false });
+    const lines = fs.readFileSync(file, 'utf8').trim().split('\n');
+    assert.deepEqual(lines, ['build = abc-123', '# Écrit par SixM (recherche mémoire) ; modifiable à la main.', 'position = 0x1008, 0x20', 'teleport = on', 'value.noclip = u8, 0x3000, 0x18', 'camera = 0x2000 # à la main']);
+    assert.throws(() => writeProfile(dir, '../x', { key: 'position', chain: [1] }), /version du jeu/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

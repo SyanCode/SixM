@@ -40,6 +40,17 @@ SixM peut alors envoyer, une ligne chacun : `{"t":"teleport","x","y","z","h"}` (
 `{"t":"set","name","value","hold"}` et `{"t":"release","name"}`. Le module répond `{"t":"did","what","ok","error"}`.
 Ce que le profil ne prévoit pas est refusé ; une valeur qui ne tient pas dans son type aussi.
 
+**Recherche mémoire** (comme Cheat Engine), seulement si le joueur l'a activée dans les réglages de SixM : SixM lance
+alors le jeu avec `SIXM_SCANNER=1`, et `ready` dit `"scanner":true`. Aucun serveur ne peut l'allumer. Ordres :
+`{"t":"scan","kind":"first"|"next","type":"u8"|"i32"|"f32","test","a","b"}` (`test` : `exact`, `between`, et pour
+`next` aussi `changed`, `unchanged`, `increased`, `decreased` ; un float « exact » l'est à 0,5 près),
+`{"t":"poke","address","type","value","hold"}`, `{"t":"unpoke","address"}`, `{"t":"pointers","address"}`. Réponses :
+`{"t":"scan","busy","progress","type","count","results":[{"a","v"}],"error"}` (30 résultats au plus, 2 millions gardés)
+et `{"t":"pointers","address","chains":[[…]]}` (chemins de un ou deux pointeurs depuis l'image du jeu, décalages de
+0x1000 au plus : ce qu'un profil peut garder d'un lancement à l'autre). La recherche ne lit que les pages
+écrivables et tourne sur un fil à part, en priorité basse. Aucune écriture, ni par la recherche ni par le profil,
+ne touche une page qui n'est pas écrivable. SixM écrit lui-même les lignes choisies dans le profil local.
+
 ## Principe
 Le bridge s'exécute dans le processus VIctory, écoute en TCP **127.0.0.1:30121** (loopback
 uniquement) et parle en NDJSON (un objet JSON par ligne, 1 Mio max/ligne). L'adaptateur SixM s'y

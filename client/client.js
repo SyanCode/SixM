@@ -3,7 +3,7 @@ import { PositionBuffer } from './interpolation.js';
 import { ScriptSandbox } from './sandbox.js';
 import { signChallenge } from '../server/identity.js';
 import { cleanMenu, cleanNotice, cleanValue, cleanWorld } from '../server/menus.js';
-import { cleanAbilities, cleanAction, cleanResult } from '../server/game.js';
+import { cleanAbilities, cleanAction, cleanPointers, cleanResult, cleanScan, SCANNER_ACTIONS } from '../server/game.js';
 
 const samePos = (a, b) => a && a.x === b.x && a.y === b.y && a.z === b.z && a.h === b.h;
 const isPos = (p) => p && [p.x, p.y, p.z, p.h].every(Number.isFinite);
@@ -46,6 +46,8 @@ export class SixMClient {
       this.adapter.onMenuClose = () => this.closeMenu();
       this.adapter.onMenuSelect = (menu, item, value) => this.selectMenu(clean(menu, 48), clean(item, 48), value);
       this.adapter.onResult = (r) => this.#send({ t: 'gameResult', ...cleanResult(r) });
+      this.adapter.onScan = (s) => this.#send({ t: 'gameScan', ...cleanScan(s) });
+      this.adapter.onPointers = (p) => this.#send({ t: 'gamePointers', ...cleanPointers(p) });
       await this.#handshake();
     } catch (e) {
       this.ws?.terminate();
@@ -220,8 +222,10 @@ export class SixMClient {
       let a;
       try { a = cleanAction(m.action); } catch { return; }
       const can = cleanAbilities(this.adapter.getAbilities?.());
-      const allowed = a.action === 'teleport' ? can.teleport : can.values.some((v) => v.name === a.name);
-      if (!allowed || !this.adapter.act?.(a)) this.#send({ t: 'gameResult', what: a.action === 'teleport' ? 'teleport' : a.name, ok: false, error: 'non permis par ce jeu' });
+      // La recherche mémoire seulement si le joueur l'a activée dans ses réglages de SixM.
+      const allowed = SCANNER_ACTIONS.includes(a.action) ? can.scanner : a.action === 'teleport' ? can.teleport : can.values.some((v) => v.name === a.name);
+      const what = SCANNER_ACTIONS.includes(a.action) ? a.action : a.action === 'teleport' ? 'teleport' : a.name;
+      if (!allowed || !this.adapter.act?.(a)) this.#send({ t: 'gameResult', what, ok: false, error: allowed ? 'le jeu ne répond pas' : 'non permis par ce jeu' });
     } else if (m.t === 'kick') {
       this.kickReason = clean(m.reason);
       this.adapter.log(`Déconnecté: ${this.kickReason}`);

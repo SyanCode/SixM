@@ -11,6 +11,7 @@ use serde_json::json;
 pub struct SettingsForm {
     pub name: String,
     pub auto_update: bool,
+    pub scanner: bool,
     pub victory: String,
     pub games: Vec<Game>,
     pub directories: String,
@@ -54,6 +55,7 @@ impl SixmApp {
             self.settings_form = Some(SettingsForm {
                 name: s.name.clone(),
                 auto_update: s.auto_update,
+                scanner: s.scanner,
                 victory: s.victory.clone(),
                 games: s.games.clone(),
                 directories: s.directories.join("\n"),
@@ -111,6 +113,17 @@ impl SixmApp {
         section(ui, "Annuaires de serveurs publics", "Un annuaire liste les serveurs publics d'Internet : ils apparaissent dans l'onglet Publics. Une adresse par ligne, jusqu'à 4. Pour en héberger un : sixm directory.", |ui| {
             ui.add(egui::TextEdit::multiline(&mut form.directories).hint_text("http://annuaire.exemple.net:30100").desired_rows(2).desired_width(f32::INFINITY));
         });
+        section(
+            ui,
+            "Recherche mémoire",
+            "Pour les admins d'un serveur : chercher dans la mémoire du jeu, comme Cheat Engine (menu « Mon jeu »), et enregistrer ce qu'on trouve dans son profil. Le serveur peut alors lire et changer la mémoire de votre jeu : n'activez que sur un serveur de confiance. Appliqué au prochain lancement du jeu.",
+            |ui| {
+                ui.horizontal(|ui| {
+                    theme::switch(ui, &mut form.scanner);
+                    ui.label("Autoriser la recherche mémoire dans mon jeu");
+                });
+            },
+        );
         let u = self.st.update.clone();
         let mut check = false;
         let mut apply = false;
@@ -218,6 +231,7 @@ impl SixmApp {
         let form = self.settings_form.clone().unwrap();
         let dirty = form.name != original.name
             || form.auto_update != original.auto_update
+            || form.scanner != original.scanner
             || form.victory != original.victory
             || form.games != original.games
             || form.directories != original.directories.join("\n");
@@ -243,7 +257,7 @@ impl SixmApp {
         let known: Vec<String> = self.st.settings.games.iter().map(|g| g.id.clone()).collect();
         let games: Vec<Game> = form.games.iter().map(|g| Game { path: unquote(&g.path), ..g.clone() }).collect();
         let directories: Vec<String> = form.directories.lines().map(|l| l.trim().trim_end_matches('/').to_string()).filter(|l| !l.is_empty()).take(4).collect();
-        let body = json!({ "name": form.name, "autoUpdate": form.auto_update, "victory": unquote(&form.victory), "games": games, "directories": directories });
+        let body = json!({ "name": form.name, "autoUpdate": form.auto_update, "scanner": form.scanner, "victory": unquote(&form.victory), "games": games, "directories": directories });
         self.act(move |api| {
             let saved = api.post("/api/settings", body)?;
             // Un jeu tout juste ajouté devient le jeu choisi.

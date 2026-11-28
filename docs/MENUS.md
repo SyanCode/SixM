@@ -91,6 +91,17 @@ sixm.game.release(id, 'noclip')
 sixm.on('gameAbilities', (player) => {})   // ce que son jeu permet a changé (sixm.getPlayer(id).game)
 sixm.on('gameResult', (player, { what, ok, error }) => {})  // réponse du jeu à chaque action
 ```
+Recherche mémoire, si le joueur l'a activée dans les réglages de SixM (`sixm.game.abilities(id).scanner`) :
+```js
+sixm.game.scan(id, { first: true, type: 'f32', test: 'between', a: -5000, b: 5000 })  // puis first: false, test: 'changed'…
+sixm.game.poke(id, address, 'u8', 1, { hold: true }); sixm.game.unpoke(id, address)
+sixm.game.pointers(id, address)            // chemins stables vers une adresse
+sixm.game.saveProfile(id, { key: 'value', name: 'noclip', type: 'u8', chain })  // ou { key: 'position', chain, teleport: true }
+sixm.on('gameScan', (player, { busy, progress, type, count, results, error }) => {})
+sixm.on('gamePointers', (player, { address, chains }) => {})
+```
+Le mod `menu` en fait « Recherche mémoire » pour les admins.
+
 `sixm.getPlayer(id)` donne aussi `located` (position connue) et `game` (ce que son jeu permet). Le mod `menu` s'en sert
 pour « Mon jeu » (no clip, valeurs du profil, aller vers un joueur) et, dans l'administration, « Aller vers lui » et
 « L'amener ici ». Réservez ces actions aux admins : un serveur qui donne le no clip à tous permet de tricher.

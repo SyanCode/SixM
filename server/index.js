@@ -12,7 +12,7 @@ import { MenuHub, cleanNotice, cleanWorld } from './menus.js';
 // Une minute du monde toutes les deux secondes : une journée en 48 minutes, comme dans les jeux de ce genre.
 const WORLD_SECONDS_PER_MINUTE = 2;
 import { loadConfig, normalizeConfig } from './config.js';
-import { cleanAction, NO_ABILITIES } from './game.js';
+import { cleanAction, NO_ABILITIES, SCANNER_ACTIONS } from './game.js';
 import { startConsole } from './console.js';
 import { UID } from './identity.js';
 
@@ -29,7 +29,8 @@ export async function createServer(rawConfig) {
   const act = (id, action) => {
     const p = player(id), a = cleanAction(action);
     const can = p?.game ?? NO_ABILITIES;
-    if (!p || !(a.action === 'teleport' ? can.teleport : can.values.some((v) => v.name === a.name))) return false;
+    const ok = SCANNER_ACTIONS.includes(a.action) ? can.scanner : a.action === 'teleport' ? can.teleport : can.values.some((v) => v.name === a.name);
+    if (!p || !ok) return false;
     net.sendToPlayer(id, { t: 'gameAct', action: a });
     return true;
   };
@@ -87,6 +88,13 @@ export async function createServer(rawConfig) {
       teleport: (id, pos) => act(id, { action: 'teleport', ...pos }),
       set: (id, name, value, { hold = false } = {}) => act(id, { action: 'set', name, value, hold }),
       release: (id, name) => act(id, { action: 'release', name }),
+      // Recherche mémoire (si le joueur l'a activée dans SixM) : réponses par 'gameScan' et 'gamePointers'.
+      scan: (id, { first = false, type, test, a, b } = {}) => act(id, { action: 'scan', first, type, test, a, b }),
+      poke: (id, address, type, value, { hold = false } = {}) => act(id, { action: 'poke', address, type, value, hold }),
+      unpoke: (id, address) => act(id, { action: 'unpoke', address }),
+      pointers: (id, address) => act(id, { action: 'pointers', address }),
+      // Écrit dans le profil local du joueur : { key: 'position', chain, teleport } ou { key: 'value', name, type, chain }.
+      saveProfile: (id, entry) => act(id, { action: 'saveProfile', ...entry }),
     },
     // Menus : entrée du menu principal, ouverture et choix.
     addMenu: (entry) => menus.add(resource, entry),

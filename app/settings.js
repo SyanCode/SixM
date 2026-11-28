@@ -5,7 +5,7 @@ import { createIdentity, isIdentity, playerUid } from '../server/identity.js';
 import { isRepo, PORTS } from './ports.js';
 
 const DEFAULTS = {
-  name: 'Joueur', autoUpdate: true, target: 'demo', victory: '', games: [], favorites: [], recents: [], directories: [],
+  name: 'Joueur', autoUpdate: true, scanner: false, target: 'demo', victory: '', games: [], favorites: [], recents: [], directories: [],
   port: 'victory', portOptions: {}, customPort: { repo: '', commit: '' },
 };
 const PORT_IDS = [...PORTS.map((p) => p.id), 'custom'];
@@ -23,6 +23,9 @@ function normalize(raw) {
   return {
     name: clean(s.name ?? '', 24) || DEFAULTS.name,
     autoUpdate: s.autoUpdate !== false,
+    // Recherche mémoire dans le jeu, pour les admins (scanner du module SixM) : désactivée tant que le joueur ne
+    // l'allume pas lui-même ; aucun serveur ne peut l'allumer à sa place.
+    scanner: s.scanner === true,
     // 'demo' : sans jeu ; 'attach' : VIctory déjà ouvert ; sinon l'installation à lancer.
     target: ['demo', 'attach', ...games.map((g) => g.id)].includes(s.target) ? s.target : DEFAULTS.target,
     victory: clean(s.victory ?? '', 1024),

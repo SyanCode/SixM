@@ -88,7 +88,10 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
     foundCache.set(port.id, { at: Date.now(), value });
     return value;
   };
-  const launchEnv = () => portEnv(portOf(settings.value.port), settings.value.portOptions[settings.value.port], found(settings.value.port, true));
+  const launchEnv = () => ({
+    ...portEnv(portOf(settings.value.port), settings.value.portOptions[settings.value.port], found(settings.value.port, true)),
+    ...(settings.value.scanner && { SIXM_SCANNER: '1' }), // lu par le module SixM au lancement du jeu
+  });
   const launchArgs = (exe, console) => portArgs(portOf(settings.value.port), settings.value.portOptions[settings.value.port], exe, console);
   const victory = current();
   if (!victoryValid() && victory.supported) {
@@ -180,9 +183,10 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
       if (c && !/^[0-9a-f]{40}$/.test(c)) throw new Error('commit attendu : 40 caractères hexadécimaux, ou rien pour le dernier');
       settings.update({ customPort: { repo: r, commit: c } });
     },
-    'POST /api/settings': ({ name, target, victory, games, directories, autoUpdate: auto }) => {
+    'POST /api/settings': ({ name, target, victory, games, directories, autoUpdate: auto, scanner }) => {
       settings.update({
         ...(auto !== undefined && { autoUpdate: auto === true }),
+        ...(scanner !== undefined && { scanner: scanner === true }),
         ...(name !== undefined && { name }), ...(target !== undefined && { target }),
         ...(victory !== undefined && { victory }), ...(games !== undefined && { games }),
         ...(directories !== undefined && { directories }),

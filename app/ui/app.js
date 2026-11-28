@@ -816,6 +816,7 @@ function settingsScreen() {
   };
   const build = victoryPanel();
   const auto = h('input', { type: 'checkbox', class: 'switch', role: 'switch', checked: settings.autoUpdate });
+  const scanner = h('input', { type: 'checkbox', class: 'switch', role: 'switch', checked: settings.scanner });
   const upText = h('p', { class: 'muted small' });
   const upCheck = btn('Vérifier', () => act(() => post('/api/update/check'))), upApply = btn('Installer et redémarrer', () => act(() => post('/api/update/apply')), 'primary');
   const updateInfo = () => {
@@ -856,7 +857,7 @@ function settingsScreen() {
           const unquote = (p) => p.trim().replace(/^"|"$/g, '');
           const list = collect().map((g) => ({ ...g, path: unquote(g.path) }));
           const known = new Set(state.settings.games.map((g) => g.id));
-          if (!await act(() => post('/api/settings', { name: name.value, autoUpdate: auto.checked, victory: unquote(victory.input.value), games: list }))) return;
+          if (!await act(() => post('/api/settings', { name: name.value, autoUpdate: auto.checked, scanner: scanner.checked, victory: unquote(victory.input.value), games: list }))) return;
           // Un jeu tout juste ajouté devient le jeu choisi.
           const added = state.settings.games.find((g) => !known.has(g.id));
           if (added) await act(() => post('/api/settings', { target: added.id }));
@@ -867,6 +868,8 @@ function settingsScreen() {
         },
       },
       section('Profil', null, field('Pseudo', name)),
+      section('Recherche mémoire', 'Pour les admins d\'un serveur : chercher dans la mémoire du jeu, comme Cheat Engine (menu « Mon jeu »). Le serveur peut alors lire et changer la mémoire de votre jeu : n\'activez que sur un serveur de confiance. Appliqué au prochain lancement du jeu.',
+        h('label', { class: 'row' }, scanner, 'Autoriser la recherche mémoire dans mon jeu')),
       section('Mises à jour', 'Au lancement, depuis GitHub. Jamais pendant une partie.', h('label', { class: 'row' }, auto, 'Mettre SixM à jour automatiquement'), upText,
         h('div', { class: 'row' }, upCheck, upApply)),
       section('Jeux', 'Le dossier extrait de votre propre disque. SixM y trouve le programme du jeu et ne modifie rien.', rows,

@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { cleanAbilities, cleanResult } from '../game.js';
+import { cleanAbilities, cleanPointers, cleanResult, cleanScan } from '../game.js';
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { playerUid, verifyChallenge } from '../identity.js';
@@ -197,6 +197,10 @@ export class Network {
         this.events.emit('gameAbilities', player);
       } else if (m.t === 'gameResult') {
         this.events.emit('gameResult', player, cleanResult(m));
+      } else if (m.t === 'gameScan') {
+        this.events.emit('gameScan', player, cleanScan(m));
+      } else if (m.t === 'gamePointers') {
+        this.events.emit('gamePointers', player, cleanPointers(m));
       } else if (m.t === 'menuOpen') {
         this.menus?.main(player);
       } else if (m.t === 'menu' && typeof m.menu === 'string' && typeof m.item === 'string') {

@@ -203,8 +203,9 @@ const gameMenu = (viewer) => {
   }
   if (!items.length) {
     items.push({
-      id: 'rien', label: 'Votre jeu ne permet rien pour l\'instant', icon: 'gear', disabled: true,
-      description: 'Ajoutez « teleport = on » ou des lignes « value.nom = u8, … » à votre profil local (integrations/victory/PROTOCOL.md).',
+      id: 'rien', label: 'Rien pour l\'instant', icon: 'gear', disabled: true,
+      description: can.scanner ? 'Trouvez des valeurs avec « Recherche mémoire » et enregistrez-les : elles apparaîtront ici.'
+        : 'Activez « Recherche mémoire » dans les réglages de SixM pour trouver ce que votre jeu permet (ou écrivez votre profil à la main).',
     });
   }
   return { id: 'jeu', title: 'Mon jeu', subtitle: 'Ce que votre profil local permet', color: VIOLET, items };
@@ -240,8 +241,151 @@ sixm.onMenu('jeu:tp', (player, item) => {
 
 // Le jeu dit si l'action a marché : seuls les échecs sont signalés.
 sixm.on('gameResult', (player, r) => {
-  if (!r.ok) sixm.notify(player.id, { title: 'Le jeu a refusé', text: `${r.what} : ${r.error ?? 'erreur'}`, icon: 'prohibit', color: RED });
+  if (r.ok && r.what === 'profile') {
+    sixm.notify(player.id, { title: 'Profil enregistré', text: 'Pris en compte dans quelques secondes, sans relancer le jeu.', icon: 'check', color: GREEN });
+  } else if (!r.ok) {
+    sixm.notify(player.id, { title: 'Le jeu a refusé', text: `${r.what} : ${r.error ?? 'erreur'}`, icon: 'prohibit', color: RED });
+  }
 });
+
+// --- Recherche mémoire (admins qui l'ont activée dans SixM) : comme Cheat Engine, dans le menu ------------------
+// Chercher une valeur, la suivre quand elle change, l'écrire ou la bloquer, trouver un chemin de pointeurs qui
+// tient d'un lancement à l'autre, puis l'enregistrer dans le profil local (position, ou valeur nommée).
+
+const TYPES = [['f32', 'Nombre à virgule (f32)'], ['i32', 'Entier (i32)'], ['u8', 'Octet (u8)']];
+const scans = new Map(); // id joueur -> { type, state, pointers: { address, chains }, path, held: Set }
+sixm.on('playerDropped', (p) => scans.delete(p.id));
+const scanOf = (id) => {
+  if (!scans.has(id)) scans.set(id, { type: 'f32', state: null, pointers: null, path: [], held: new Set() });
+  return scans.get(id);
+};
+const hexa = (n) => `0x${n.toString(16).toUpperCase()}`;
+const shown = (v, type) => (v === null ? '?' : type === 'f32' ? String(Math.round(v * 1000) / 1000) : String(v));
+
+const chainMenu = (r, chain, i) => ({
+  id: 'scan:chemin', title: `Chemin ${i + 1}`, subtitle: chain.map(hexa).join(' → '), color: VIOLET,
+  items: [
+    {
+      id: `pos:${r.a}:${i}`, label: 'Enregistrer comme position et téléportation', icon: 'map', confirm: true,
+      description: 'Cette adresse doit être le X du joueur (Y et Z suivent). Active aussi la téléportation dans votre profil.',
+    },
+    { id: `val:${r.a}:${i}`, type: 'input', label: 'Enregistrer comme valeur nommée', icon: 'star', placeholder: 'noclip', maxLength: 24, description: 'Elle apparaîtra dans « Mon jeu » : une case pour un octet, un champ sinon.' },
+  ],
+});
+
+const scanMenu = (viewer) => {
+  const s = scanOf(viewer.id), st = s.state, type = s.type;
+  const typeIndex = TYPES.findIndex(([t]) => t === type);
+  const status = !st ? 'Aucune recherche'
+    : st.busy ? `Recherche… ${Math.round(st.progress * 100)} %`
+      : st.error ? `Erreur : ${st.error}` : `${st.count} résultat(s)`;
+  const results = st && !st.busy ? st.results : [];
+  const items = [
+    { id: 'type', type: 'list', label: 'Type de valeur', icon: 'gear', options: TYPES.map(([, n]) => n), value: typeIndex, description: 'Une position est presque toujours un nombre à virgule ; une vie ou un indicateur, un entier ou un octet.' },
+    { id: 'statut', label: status, icon: st?.busy ? 'clock' : 'target', disabled: true, description: st && !st.busy && st.count > results.length ? `Les ${results.length} premiers sont affichés.` : '' },
+    { type: 'separator', label: 'Nouvelle recherche' },
+    { id: 'new:exact', type: 'input', label: 'Valeur exacte', icon: 'target', placeholder: '100', maxLength: 32 },
+    { id: 'new:between', type: 'input', label: 'Entre deux valeurs', icon: 'target', placeholder: '-5000 5000', maxLength: 64, description: 'Deux nombres séparés par un espace. Pour une valeur inconnue, une fourchette large.' },
+    { type: 'separator', label: 'Parmi les résultats' },
+    { id: 'next:exact', type: 'input', label: 'Égale à', placeholder: '120', maxLength: 32, disabled: !st?.count },
+    { id: 'next:changed', label: 'A changé', disabled: !st?.count },
+    { id: 'next:unchanged', label: 'N\'a pas changé', disabled: !st?.count },
+    { id: 'next:increased', label: 'A augmenté', disabled: !st?.count },
+    { id: 'next:decreased', label: 'A diminué', disabled: !st?.count },
+  ];
+  if (results.length) {
+    items.push({ type: 'separator', label: 'Résultats' }, ...results.map((r) => {
+      const ptr = s.pointers?.address === r.a ? s.pointers : null;
+      return {
+        id: `r:${r.a}`, type: 'submenu', label: hexa(r.a), right: shown(r.v, st.type), icon: 'target', badge: s.held.has(r.a) ? 'BLOQUÉE' : '', badgeColor: RED,
+        menu: {
+          id: 'scan:adresse', title: hexa(r.a), subtitle: `${TYPES.find(([t]) => t === st.type)[1]} : ${shown(r.v, st.type)}`, color: VIOLET,
+          items: [
+            { id: `set:${r.a}`, type: 'input', label: 'Écrire une valeur', icon: 'wrench', placeholder: shown(r.v, st.type), maxLength: 32 },
+            { id: `hold:${r.a}`, type: 'checkbox', label: 'Bloquer à sa valeur', icon: 'lightning', value: s.held.has(r.a), description: 'Réécrite à chaque image, même si le jeu la change.' },
+            { id: `ptr:${r.a}`, label: 'Chercher un chemin stable', icon: 'map', description: 'Des pointeurs depuis le jeu jusqu\'à cette adresse : elle change à chaque lancement, eux non.' },
+            ...(ptr ? (ptr.chains.length
+              ? [{ type: 'separator', label: 'Chemins trouvés' }, ...ptr.chains.map((c, i) => ({ id: `c:${r.a}:${i}`, type: 'submenu', label: c.map(hexa).join(' → '), menu: chainMenu(r, c, i) }))]
+              : [{ id: 'aucun', label: 'Aucun chemin trouvé (deux pointeurs au plus)', disabled: true }]) : []),
+          ],
+        },
+      };
+    }));
+  }
+  return { id: 'scan', title: 'Recherche mémoire', subtitle: 'Comme Cheat Engine, dans votre jeu', color: VIOLET, items, open: s.path };
+};
+
+sixm.addMenu({
+  id: 'scan', label: 'Recherche mémoire', icon: 'target', description: 'Chercher et changer des valeurs du jeu, comme Cheat Engine.',
+  badge: 'ADMIN', visible: (p) => admin(p) && sixm.getPlayer(p.id)?.game.scanner, open: (p) => { scanOf(p.id).path = []; return scanMenu(p); },
+});
+
+const reopen = (player, path = []) => {
+  const s = scanOf(player.id);
+  s.path = path;
+  if (sixm.getPlayer(player.id)) sixm.openMenu(player.id, scanMenu(player));
+};
+const numbers = (text) => String(text ?? '').replace(/,/g, '.').trim().split(/[\s;]+/).filter(Boolean).map(Number);
+const refuse = (player, text) => sixm.notify(player.id, { title: 'Recherche mémoire', text, icon: 'prohibit', color: RED });
+
+sixm.on('gameScan', (player, state) => {
+  const s = scans.get(player.id);
+  if (!s) return; // pas lancée depuis ce menu
+  s.state = state;
+  if (!state.busy) { s.pointers = null; s.held = new Set([...s.held].filter((a) => state.results.some((r) => r.a === a))); }
+  reopen(player, s.path);
+});
+sixm.on('gamePointers', (player, p) => {
+  const s = scans.get(player.id);
+  if (!s) return;
+  s.pointers = p;
+  reopen(player, [`r:${p.address}`]);
+});
+
+const scanAction = (player, item, value) => {
+  if (!admin(player) || !sixm.getPlayer(player.id)?.game.scanner) return;
+  const s = scanOf(player.id);
+  if (item === 'type' && Number.isInteger(value) && TYPES[value]) { s.type = TYPES[value][0]; return reopen(player); }
+  const [what, test, extra] = item.split(':');
+  if (what === 'new' || what === 'next') {
+    const n = test === 'exact' || test === 'between' ? numbers(value) : [];
+    if (test === 'exact' && (n.length !== 1 || !Number.isFinite(n[0]))) return refuse(player, 'une valeur, par exemple 100');
+    if (test === 'between' && (n.length !== 2 || !n.every(Number.isFinite))) return refuse(player, 'deux valeurs, par exemple -5000 5000');
+    const type = what === 'new' ? s.type : s.state?.type ?? s.type;
+    if (!sixm.game.scan(player.id, { first: what === 'new', type, test, a: n[0], b: n[1] })) return refuse(player, 'désactivée dans les réglages de SixM de ce joueur');
+    s.state = { busy: true, progress: 0, type, count: 0, results: [], error: null };
+    return reopen(player);
+  }
+  const address = Number(test), type = s.state?.type ?? s.type;
+  if (!Number.isSafeInteger(address)) return;
+  const r = s.state?.results.find((x) => x.a === address);
+  if (what === 'set') {
+    const [v] = numbers(value);
+    if (!Number.isFinite(v) || !sixm.game.poke(player.id, address, type, v, { hold: s.held.has(address) })) return refuse(player, 'valeur invalide');
+    if (r) r.v = v;
+    return reopen(player, [`r:${address}`]);
+  }
+  if (what === 'hold') {
+    if (value === true && r?.v !== null && r) { sixm.game.poke(player.id, address, type, r.v, { hold: true }); s.held.add(address); }
+    else { sixm.game.unpoke(player.id, address); s.held.delete(address); }
+    return reopen(player, [`r:${address}`]);
+  }
+  if (what === 'ptr') {
+    sixm.game.pointers(player.id, address);
+    return sixm.notify(player.id, { title: 'Recherche mémoire', text: 'Recherche des chemins de pointeurs…', icon: 'clock', color: VIOLET });
+  }
+  if (what === 'pos' || what === 'val') {
+    const chain = s.pointers?.address === address ? s.pointers.chains[Number(extra)] : null;
+    if (!chain) return refuse(player, 'cherchez d\'abord un chemin stable');
+    if (what === 'pos') return sixm.game.saveProfile(player.id, { key: 'position', chain, teleport: true });
+    const name = String(value ?? '').trim().toLowerCase();
+    if (!/^[a-z0-9_]{1,24}$/.test(name)) return refuse(player, 'un nom en minuscules, chiffres et _ (ex. noclip)');
+    return sixm.game.saveProfile(player.id, { key: 'value', name, type, chain });
+  }
+};
+sixm.onMenu('scan', scanAction);
+sixm.onMenu('scan:adresse', scanAction);
+sixm.onMenu('scan:chemin', scanAction);
 
 // --- Administration (admins seulement) ------------------------------------------------------------
 

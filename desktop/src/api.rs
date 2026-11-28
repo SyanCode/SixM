@@ -62,6 +62,7 @@ pub struct PortOption {
 pub struct Settings {
     pub name: String,
     pub auto_update: bool,
+    pub scanner: bool,
     pub target: String,
     pub victory: String,
     pub games: Vec<Game>,

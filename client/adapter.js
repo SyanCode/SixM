@@ -26,5 +26,8 @@ export class GameAdapter {
   onChat = null;
   /** Appelé avec le résultat d'une action : { what, ok, error } ; défini par le client. */
   onResult = null;
+  /** Recherche mémoire : état d'une recherche, chemins de pointeurs (server/game.js) ; définis par le client. */
+  onScan = null;
+  onPointers = null;
   async shutdown() {}
 }

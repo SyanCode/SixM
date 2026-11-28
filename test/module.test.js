@@ -63,7 +63,7 @@ test('module : jeton, position, caméra, données invalides ignorées, reconnexi
   fake.send({ t: 'localPlayer', x: 1, y: 2, z: 3, h: 0 });
   fake.send({ t: 'camera', m: Array(16).fill(1) });
   await until(() => cameras.length, 'caméra');
-  assert.deepEqual(m.state(), { connected: true, build: 'abc-123', profile: true, error: null, located: true, abilities: { teleport: false, values: [] } });
+  assert.deepEqual(m.state(), { connected: true, build: 'abc-123', profile: true, error: null, located: true, abilities: { teleport: false, values: [], scanner: false } });
   for (const bad of ['{oups\n', 'null\n', { t: 'localPlayer', x: 'a', y: 0, z: 0, h: 0 }, { t: 'camera', m: [1] }, { t: 'camera', m: Array(16).fill(null) }, { t: 'ready', build: '../x', profile: 1, error: 5 }]) fake.send(bad);
   await until(() => m.build === null, 'ready invalide');
   assert.deepEqual([m.position.x, cameras.length, m.profile, m.error], [1, 1, false, null]);
@@ -120,5 +120,5 @@ test('verrou de cargo et empreinte du module', () => {
   assert.deepEqual([...lockPackages(lock)], ['a 1.0.0 x', 'b 2.0.0 ']);
   const m = moduleSource();
   assert.match(m.id, /^[0-9a-f]{12}$/);
-  assert.deepEqual(m.files.map((f) => f.name), ['Cargo.toml', 'src/lib.rs', 'src/memory.rs', 'src/orders.rs', 'src/profile.rs']);
+  assert.deepEqual(m.files.map((f) => f.name), ['Cargo.toml', 'src/lib.rs', 'src/memory.rs', 'src/orders.rs', 'src/profile.rs', 'src/scan.rs']);
 });
