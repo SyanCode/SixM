@@ -7,12 +7,54 @@
 //! heading  = 0x1000, 0x20, 0xa0      # one f32, radians (optional)
 //! camera   = 0x2000, 0x0             # sixteen f32: view-projection matrix (optional)
 //! camera_order = row                 # row or column (default: row)
+//! teleport = on                      # the server may move the player (writes `position`)
+//! value.noclip = u8, 0x3000, 0x18    # a value the server may set: name = type (u8, i32, f32), chain
 //! ```
 //!
 //! A chain is an offset from the image base, then offsets followed through pointers: `a` reads at
 //! `base + a`; `a, b, c` reads at `[[base + a] + b] + c`.
+//!
+//! Nothing is written unless the profile says so: `teleport = on` for the position, a `value.` line
+//! for each other place. The user, who writes the profile, decides what a server may change.
 
 pub const MAX_CHAIN: usize = 16;
+pub const MAX_VALUES: usize = 32;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    U8,
+    I32,
+    F32,
+}
+
+impl Kind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Kind::U8 => "u8",
+            Kind::I32 => "i32",
+            Kind::F32 => "f32",
+        }
+    }
+
+    /// The bytes of `v` for this type, or None when it does not fit.
+    pub fn bytes(self, v: f64) -> Option<Vec<u8>> {
+        if !v.is_finite() {
+            return None;
+        }
+        match self {
+            Kind::U8 => (v.fract() == 0.0 && (0.0..=255.0).contains(&v)).then(|| vec![v as u8]),
+            Kind::I32 => (v.fract() == 0.0 && (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&v)).then(|| (v as i32).to_le_bytes().to_vec()),
+            Kind::F32 => (v.abs() < 1e30).then(|| (v as f32).to_le_bytes().to_vec()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Value {
+    pub name: String,
+    pub kind: Kind,
+    pub chain: Vec<u64>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Profile {
@@ -21,10 +63,13 @@ pub struct Profile {
     pub heading: Option<Vec<u64>>,
     pub camera: Option<Vec<u64>>,
     pub column_major: bool,
+    pub teleport: bool,
+    pub values: Vec<Value>,
 }
 
 pub fn parse(text: &str) -> Result<Profile, String> {
     let (mut build, mut position, mut heading, mut camera, mut column_major) = (None, None, None, None, false);
+    let (mut teleport, mut values) = (false, Vec::<Value>::new());
     for (i, raw) in text.trim_start_matches('\u{feff}').lines().enumerate() {
         let line = raw.split('#').next().unwrap_or("").trim();
         if line.is_empty() {
@@ -46,6 +91,33 @@ pub fn parse(text: &str) -> Result<Profile, String> {
                     _ => return Err(at("camera_order must be row or column")),
                 }
             }
+            "teleport" => {
+                teleport = match value {
+                    "on" | "yes" | "1" => true,
+                    "off" | "no" | "0" => false,
+                    _ => return Err(at("teleport must be on or off")),
+                }
+            }
+            key if key.starts_with("value.") => {
+                let name = &key["value.".len()..];
+                if name.is_empty() || name.len() > 24 || !name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_') {
+                    return Err(at("a value name is 1 to 24 of a-z, 0-9 and _"));
+                }
+                if values.iter().any(|v| v.name == name) {
+                    return Err(at(&format!("value {name} given twice")));
+                }
+                if values.len() == MAX_VALUES {
+                    return Err(at(&format!("at most {MAX_VALUES} values")));
+                }
+                let (kind, rest) = value.split_once(',').ok_or_else(|| at("expected a type, then the chain"))?;
+                let kind = match kind.trim() {
+                    "u8" => Kind::U8,
+                    "i32" => Kind::I32,
+                    "f32" => Kind::F32,
+                    _ => return Err(at("the type is u8, i32 or f32")),
+                };
+                values.push(Value { name: name.to_owned(), kind, chain: chain(rest).map_err(|m| at(&m))? });
+            }
             other => return Err(at(&format!("unknown key {other}"))),
         }
     }
@@ -55,6 +127,8 @@ pub fn parse(text: &str) -> Result<Profile, String> {
         heading,
         camera,
         column_major,
+        teleport,
+        values,
     })
 }
 
@@ -94,12 +168,32 @@ mod tests {
     }
 
     #[test]
+    fn values_and_teleport() {
+        let p = parse("build = 1-2\nposition = 1\nteleport = on\nvalue.noclip = u8, 0x3000, 0x18\nvalue.speed = f32,4\n").unwrap();
+        assert!(p.teleport);
+        assert_eq!(p.values, [
+            Value { name: "noclip".into(), kind: Kind::U8, chain: vec![0x3000, 0x18] },
+            Value { name: "speed".into(), kind: Kind::F32, chain: vec![4] },
+        ]);
+        assert!(!parse("build = 1-2\nposition = 1\n").unwrap().teleport, "off unless asked");
+        assert_eq!(Kind::U8.bytes(1.0), Some(vec![1]));
+        assert_eq!(Kind::U8.bytes(256.0), None);
+        assert_eq!(Kind::U8.bytes(0.5), None);
+        assert_eq!(Kind::I32.bytes(-2.0), Some((-2i32).to_le_bytes().to_vec()));
+        assert_eq!(Kind::F32.bytes(1.5), Some(1.5f32.to_le_bytes().to_vec()));
+        assert_eq!(Kind::F32.bytes(f64::NAN), None);
+    }
+
+    #[test]
     fn rejects() {
         for bad in [
             "", "build = 1-2", "position = 1", "build = x\nposition = 1", "build = 1-2\nposition =",
             "build = 1-2\nposition = -1", "build = 1-2\nposition = 0xfffffffffffffff", "build = 1-2\nposition = 1\nnope = 2",
             "build = 1-2\nposition = 1\ncamera_order = diagonal", "build = 1-2\nposition 1", "build = 123456789-2\nposition = 1",
             "build = 1-2\nposition = 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+            "build = 1-2\nposition = 1\nteleport = maybe", "build = 1-2\nposition = 1\nvalue. = u8, 1",
+            "build = 1-2\nposition = 1\nvalue.Noclip = u8, 1", "build = 1-2\nposition = 1\nvalue.x = u16, 1",
+            "build = 1-2\nposition = 1\nvalue.x = u8", "build = 1-2\nposition = 1\nvalue.x = u8, 1\nvalue.x = u8, 2",
         ] {
             assert!(parse(bad).is_err(), "{bad:?}");
         }

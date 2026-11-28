@@ -3,6 +3,7 @@ import { PositionBuffer } from './interpolation.js';
 import { ScriptSandbox } from './sandbox.js';
 import { signChallenge } from '../server/identity.js';
 import { cleanMenu, cleanNotice, cleanValue, cleanWorld } from '../server/menus.js';
+import { cleanAbilities, cleanAction, cleanResult } from '../server/game.js';
 
 const samePos = (a, b) => a && a.x === b.x && a.y === b.y && a.z === b.z && a.h === b.h;
 const isPos = (p) => p && [p.x, p.y, p.z, p.h].every(Number.isFinite);
@@ -44,6 +45,7 @@ export class SixMClient {
       this.adapter.onMenuOpen = () => this.openMenu();
       this.adapter.onMenuClose = () => this.closeMenu();
       this.adapter.onMenuSelect = (menu, item, value) => this.selectMenu(clean(menu, 48), clean(item, 48), value);
+      this.adapter.onResult = (r) => this.#send({ t: 'gameResult', ...cleanResult(r) });
       await this.#handshake();
     } catch (e) {
       this.ws?.terminate();
@@ -55,6 +57,10 @@ export class SixMClient {
       const pos = this.adapter.getLocalPlayerPosition();
       // null : le jeu n'a pas (ou plus) de position à donner, ex. bridge déconnecté.
       if (pos) this.#send({ t: 'pos', x: pos.x, y: pos.y, z: pos.z, h: pos.h });
+      // Ce que le jeu permet change avec le profil et le module : le serveur l'apprend à chaque changement.
+      const can = cleanAbilities(this.adapter.getAbilities?.());
+      const key = JSON.stringify(can);
+      if (key !== this.abilitiesSent) { this.abilitiesSent = key; this.#send({ t: 'game', ...can }); }
     }, this.posIntervalMs);
     this.renderTimer = setInterval(() => this.#render(), this.renderIntervalMs);
   }
@@ -209,6 +215,13 @@ export class SixMClient {
       this.adapter.notify?.(notice);
     } else if (m.t === 'world') {
       this.#setWorld(m.world);
+    } else if (m.t === 'gameAct') {
+      // Seulement ce que le jeu a annoncé ; le module le vérifie encore avec le profil.
+      let a;
+      try { a = cleanAction(m.action); } catch { return; }
+      const can = cleanAbilities(this.adapter.getAbilities?.());
+      const allowed = a.action === 'teleport' ? can.teleport : can.values.some((v) => v.name === a.name);
+      if (!allowed || !this.adapter.act?.(a)) this.#send({ t: 'gameResult', what: a.action === 'teleport' ? 'teleport' : a.name, ok: false, error: 'non permis par ce jeu' });
     } else if (m.t === 'kick') {
       this.kickReason = clean(m.reason);
       this.adapter.log(`Déconnecté: ${this.kickReason}`);

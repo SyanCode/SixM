@@ -1,6 +1,6 @@
 [package]
 name = "sixm-bridge"
-description = "SixM module for VIctory: local player and camera, read through a user profile."
+description = "SixM module for VIctory: local player and camera, and what a user profile lets a server change."
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.88"

@@ -29,6 +29,31 @@ async function fakeModule(token) {
   return { port: srv.address().port, socks, send: (m) => socks.at(-1).write(typeof m === 'string' ? m : JSON.stringify(m) + '\n'), close: () => { socks.forEach((s) => s.destroy()); srv.close(); } };
 }
 
+test('module : actions que le profil permet, envoyées au jeu, résultat rendu', async (t) => {
+  const fake = await fakeModule('jeton-de-test-0123');
+  const results = [];
+  const m = new GameModule({ port: fake.port, token: 'jeton-de-test-0123', retryMs: 20, onResult: (r) => results.push(r) });
+  t.after(() => { m.stop(); fake.close(); });
+  await until(() => fake.socks.length === 1, 'connexion');
+  const got = [];
+  fake.socks[0].on('data', (d) => got.push(...d.trim().split('\n').map((l) => JSON.parse(l))));
+  fake.send({ t: 'ready', build: 'abc-123', profile: true, error: null, teleport: true, values: [{ name: 'noclip', type: 'u8' }, { name: '../x', type: 'u8' }] });
+  await until(() => m.abilities.teleport, 'capacités');
+  assert.deepEqual(m.abilities.values, [{ name: 'noclip', type: 'u8' }]);
+  assert.ok(m.act({ action: 'teleport', x: 1, y: 2, z: 3 }));
+  assert.ok(m.act({ action: 'set', name: 'noclip', value: true, hold: true }));
+  assert.throws(() => m.act({ action: 'write', address: 1 }), /action inconnue/);
+  await until(() => got.length === 2, 'ordres reçus');
+  assert.deepEqual(got, [{ t: 'teleport', x: 1, y: 2, z: 3 }, { t: 'set', name: 'noclip', value: 1, hold: true }]);
+  fake.send({ t: 'did', what: 'noclip', ok: false, error: 'the value could not be written' });
+  await until(() => results.length, 'résultat');
+  assert.deepEqual(results[0], { what: 'noclip', ok: false, error: 'the value could not be written' });
+  fake.socks[0].destroy();
+  await until(() => !m.connected, 'déconnecté');
+  assert.equal(m.abilities.teleport, false, 'plus rien de permis sans le jeu');
+  assert.equal(m.act({ action: 'teleport', x: 1, y: 2, z: 3 }), false);
+});
+
 test('module : jeton, position, caméra, données invalides ignorées, reconnexion', async () => {
   const fake = await fakeModule('jeton-de-test-0123');
   const cameras = [];
@@ -38,7 +63,7 @@ test('module : jeton, position, caméra, données invalides ignorées, reconnexi
   fake.send({ t: 'localPlayer', x: 1, y: 2, z: 3, h: 0 });
   fake.send({ t: 'camera', m: Array(16).fill(1) });
   await until(() => cameras.length, 'caméra');
-  assert.deepEqual(m.state(), { connected: true, build: 'abc-123', profile: true, error: null, located: true });
+  assert.deepEqual(m.state(), { connected: true, build: 'abc-123', profile: true, error: null, located: true, abilities: { teleport: false, values: [] } });
   for (const bad of ['{oups\n', 'null\n', { t: 'localPlayer', x: 'a', y: 0, z: 0, h: 0 }, { t: 'camera', m: [1] }, { t: 'camera', m: Array(16).fill(null) }, { t: 'ready', build: '../x', profile: 1, error: 5 }]) fake.send(bad);
   await until(() => m.build === null, 'ready invalide');
   assert.deepEqual([m.position.x, cameras.length, m.profile, m.error], [1, 1, false, null]);
@@ -95,5 +120,5 @@ test('verrou de cargo et empreinte du module', () => {
   assert.deepEqual([...lockPackages(lock)], ['a 1.0.0 x', 'b 2.0.0 ']);
   const m = moduleSource();
   assert.match(m.id, /^[0-9a-f]{12}$/);
-  assert.deepEqual(m.files.map((f) => f.name), ['Cargo.toml', 'src/lib.rs', 'src/memory.rs', 'src/profile.rs']);
+  assert.deepEqual(m.files.map((f) => f.name), ['Cargo.toml', 'src/lib.rs', 'src/memory.rs', 'src/orders.rs', 'src/profile.rs']);
 });

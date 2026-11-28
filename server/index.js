@@ -12,6 +12,7 @@ import { MenuHub, cleanNotice, cleanWorld } from './menus.js';
 // Une minute du monde toutes les deux secondes : une journée en 48 minutes, comme dans les jeux de ce genre.
 const WORLD_SECONDS_PER_MINUTE = 2;
 import { loadConfig, normalizeConfig } from './config.js';
+import { cleanAction, NO_ABILITIES } from './game.js';
 import { startConsole } from './console.js';
 import { UID } from './identity.js';
 
@@ -23,7 +24,15 @@ export async function createServer(rawConfig) {
   const access = new AccessList(config.accessFile);
   let net, menus;
   const player = (id) => world.players.get(id);
-  const view = (p) => p && { id: p.id, name: p.name, uid: p.uid, admin: access.isAdmin(p.uid), pos: p.pos };
+  const view = (p) => p && { id: p.id, name: p.name, uid: p.uid, admin: access.isAdmin(p.uid), pos: p.pos, located: p.located, game: p.game ?? NO_ABILITIES };
+  /** Action sur le jeu d'un joueur, seulement si son jeu l'a annoncée (le module la vérifie encore). */
+  const act = (id, action) => {
+    const p = player(id), a = cleanAction(action);
+    const can = p?.game ?? NO_ABILITIES;
+    if (!p || !(a.action === 'teleport' ? can.teleport : can.values.some((v) => v.name === a.name))) return false;
+    net.sendToPlayer(id, { t: 'gameAct', action: a });
+    return true;
+  };
 
   // API exposée aux scripts serveur de chaque ressource (global `sixm`).
   const api = (resource) => ({
@@ -70,6 +79,14 @@ export async function createServer(rawConfig) {
       start: (name) => resources.start(String(name)),
       stop: (name) => { if (name === resource) throw new Error('une ressource ne s\'arrête pas elle-même'); return resources.stop(String(name)); },
       restart: (name) => { if (name === resource) throw new Error('une ressource ne se redémarre pas elle-même'); resources.restart(String(name)); },
+    },
+    // Jeu de chaque joueur, par le module SixM dans VIctory : ce que son profil local permet.
+    // Renvoient faux si son jeu ne le permet pas ; le résultat arrive par l'évènement 'gameResult'.
+    game: {
+      abilities: (id) => structuredClone(player(id)?.game ?? NO_ABILITIES),
+      teleport: (id, pos) => act(id, { action: 'teleport', ...pos }),
+      set: (id, name, value, { hold = false } = {}) => act(id, { action: 'set', name, value, hold }),
+      release: (id, name) => act(id, { action: 'release', name }),
     },
     // Menus : entrée du menu principal, ouverture et choix.
     addMenu: (entry) => menus.add(resource, entry),

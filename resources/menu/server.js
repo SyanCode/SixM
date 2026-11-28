@@ -2,7 +2,8 @@
 // Exemple complet pour écrire ses menus : sixm.addMenu, sixm.openMenu, sixm.onMenu, sixm.notify (docs/MENUS.md).
 //
 // Tout ce qui est ici fonctionne sans le jeu : messages, signalements, heure et météo partagées,
-// administration. Appliquer l'heure et la météo dans le jeu revient au portage qui sait le faire.
+// administration. « Mon jeu » et la téléportation agissent sur le jeu par sixm.game, là où le profil
+// local de chaque joueur le permet. Appliquer l'heure et la météo dans le jeu revient au portage.
 
 const RED = '#e5484d', GREEN = '#30a46c', BLUE = '#3e63dd', VIOLET = '#8e4ec6', GOLD = '#f5a524';
 
@@ -169,10 +170,83 @@ sixm.onMenu('profil', (player, item, value) => {
   if (item === 'sons' && typeof value === 'boolean') p.sons = value;
 });
 
+// --- Mon jeu (admins) : ce que le profil local de chacun permet (no clip, téléportation…) --------------
+// Le jeu n'est touché que par le module SixM dans VIctory, et seulement là où le profil du joueur l'autorise.
+
+const VALUE_LABELS = {
+  noclip: ['No clip', 'Traverser les murs et voler.'], invincible: ['Invincible', 'Aucun dégât.'], god: ['Invincible', 'Aucun dégât.'],
+  speed: ['Vitesse', 'Multiplicateur de vitesse.'], gravity: ['Gravité', ''], wanted: ['Niveau de recherche', ''], money: ['Argent', ''],
+};
+const label = (name) => VALUE_LABELS[name] ?? [name.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()), ''];
+const gameState = new Map(); // id joueur -> Map(nom -> valeur posée)
+sixm.on('playerDropped', (p) => gameState.delete(p.id));
+/** Un peu à côté d'une position, pour ne pas arriver dans quelqu'un. */
+const near = (pos) => ({ x: pos.x + 1.5, y: pos.y + 1.5, z: pos.z + 0.5, h: pos.h });
+
+const gameMenu = (viewer) => {
+  const me = sixm.getPlayer(viewer.id), can = me.game, set = gameState.get(viewer.id) ?? new Map();
+  const targets = others(viewer).filter((p) => p.located);
+  const items = can.values.map((v) => {
+    const [text, description] = label(v.name);
+    return v.type === 'u8'
+      ? { id: `v:${v.name}`, type: 'checkbox', label: text, value: set.get(v.name) === 1, description: description || `Valeur « ${v.name} » de votre profil.` }
+      : { id: `v:${v.name}`, type: 'input', label: text, right: set.has(v.name) ? String(set.get(v.name)) : '', placeholder: v.type === 'f32' ? '1.0' : '0', maxLength: 16, description: description || `Valeur « ${v.name} » (${v.type}) de votre profil.` };
+  });
+  if (can.teleport) {
+    items.push({ type: 'separator', label: 'Téléportation' }, {
+      id: 'tp', type: 'submenu', label: 'Aller vers un joueur', icon: 'map', right: String(targets.length),
+      menu: {
+        id: 'jeu:tp', title: 'Aller vers un joueur', color: VIOLET,
+        items: targets.length ? targets.map((p) => ({ id: String(p.id), label: p.name, icon: 'user' })) : [{ id: 'vide', label: 'Aucune position connue', disabled: true }],
+      },
+    });
+  }
+  if (!items.length) {
+    items.push({
+      id: 'rien', label: 'Votre jeu ne permet rien pour l\'instant', icon: 'gear', disabled: true,
+      description: 'Ajoutez « teleport = on » ou des lignes « value.nom = u8, … » à votre profil local (integrations/victory/PROTOCOL.md).',
+    });
+  }
+  return { id: 'jeu', title: 'Mon jeu', subtitle: 'Ce que votre profil local permet', color: VIOLET, items };
+};
+
+sixm.addMenu({
+  id: 'jeu', label: 'Mon jeu', icon: 'game', description: 'No clip, téléportation… selon votre profil local.',
+  badge: 'ADMIN', visible: admin, open: gameMenu,
+});
+
+sixm.onMenu('jeu', (player, item, value) => {
+  if (!admin(player) || !item.startsWith('v:')) return;
+  const name = item.slice(2), v = sixm.getPlayer(player.id).game.values.find((x) => x.name === name);
+  if (!v) return;
+  const n = typeof value === 'boolean' ? Number(value) : Number(String(value ?? '').replace(',', '.'));
+  if (!Number.isFinite(n) || String(value ?? '').trim() === '') return;
+  // Une case reste posée (le jeu la remettrait sinon) ; décochée, le jeu reprend la main.
+  const done = v.type === 'u8' && n === 0 ? sixm.game.set(player.id, name, 0) && sixm.game.release(player.id, name)
+    : sixm.game.set(player.id, name, n, { hold: v.type === 'u8' });
+  if (!done) return sixm.notify(player.id, { title: 'Impossible', text: 'votre jeu ne le permet plus', icon: 'prohibit', color: RED });
+  if (!gameState.has(player.id)) gameState.set(player.id, new Map());
+  gameState.get(player.id).set(name, n);
+  sixm.openMenu(player.id, gameMenu(player));
+});
+
+sixm.onMenu('jeu:tp', (player, item) => {
+  if (!admin(player)) return;
+  const target = sixm.getPlayer(Number(item));
+  if (!target?.located || !sixm.game.teleport(player.id, near(target.pos))) {
+    sixm.notify(player.id, { title: 'Impossible', text: target ? 'téléportation refusée' : 'ce joueur est parti', icon: 'prohibit', color: RED });
+  }
+});
+
+// Le jeu dit si l'action a marché : seuls les échecs sont signalés.
+sixm.on('gameResult', (player, r) => {
+  if (!r.ok) sixm.notify(player.id, { title: 'Le jeu a refusé', text: `${r.what} : ${r.error ?? 'erreur'}`, icon: 'prohibit', color: RED });
+});
+
 // --- Administration (admins seulement) ------------------------------------------------------------
 
 const adminMenu = (viewer) => {
-  const players = others(viewer);
+  const players = others(viewer), me = sixm.getPlayer(viewer.id);
   const requests = sixm.whitelist.requests();
   const res = sixm.resources.list();
   return {
@@ -191,6 +265,15 @@ const adminMenu = (viewer) => {
                 { id: `kick:${p.id}`, label: 'Expulser', icon: 'sign-out', confirm: true },
                 { id: `ban:${p.id}`, label: 'Bannir', icon: 'prohibit', confirm: true, description: 'Par adresse IP et par identifiant.' },
                 { id: `admin:${p.id}`, label: p.admin ? 'Retirer les droits d\'admin' : 'Nommer admin', icon: 'crown', confirm: true, disabled: !p.uid },
+                { type: 'separator', label: 'Dans le jeu' },
+                {
+                  id: `goto:${p.id}`, label: 'Aller vers lui', icon: 'map', disabled: !me.game.teleport || !p.located,
+                  description: !me.game.teleport ? 'Votre jeu ne permet pas la téléportation (profil local).' : !p.located ? 'Sa position est inconnue.' : '',
+                },
+                {
+                  id: `bring:${p.id}`, label: 'L\'amener ici', icon: 'target', disabled: !p.game.teleport || !me.located,
+                  description: !p.game.teleport ? 'Son jeu ne permet pas la téléportation.' : !me.located ? 'Votre position est inconnue.' : '',
+                },
               ],
             },
           })) : [{ id: 'vide', label: 'Personne d\'autre pour l\'instant', disabled: true }],
@@ -270,6 +353,12 @@ sixm.onMenu('admin:joueur', asAdmin((player, item, value) => {
   if (action === 'warn' && typeof value === 'string' && value) {
     sixm.notify(target.id, { title: 'Avertissement', text: value, icon: 'megaphone', color: RED, seconds: 10 });
     sixm.notify(player.id, { title: 'Avertissement envoyé', text: target.name, icon: 'check', color: GREEN });
+  }
+  if (action === 'goto' && !sixm.game.teleport(player.id, near(target.pos))) throw new Error('votre jeu ne permet pas la téléportation');
+  if (action === 'bring') {
+    const me = sixm.getPlayer(player.id);
+    if (!sixm.game.teleport(target.id, near(me.pos))) throw new Error(`le jeu de ${target.name} ne permet pas la téléportation`);
+    sixm.notify(target.id, { title: 'Téléporté', text: `par ${player.name}`, icon: 'map', color: BLUE });
   }
   if (action === 'kick') sixm.kick(target.id, `expulsé par ${player.name}`);
   if (action === 'ban') sixm.ban(target.id, `banni par ${player.name}`);

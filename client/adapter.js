@@ -18,7 +18,13 @@ export class GameAdapter {
   log(text) { throw new Error('non implémenté'); }
   /** Nom du serveur et de tous les joueurs (facultatif). */
   setRoster(server, names) {}
+  /** Ce que le jeu permet au serveur : { teleport, values: [{ name, type }] } (server/game.js). */
+  getAbilities() { return { teleport: false, values: [] }; }
+  /** Action demandée par le serveur (déjà validée) ; renvoie faux si le jeu ne peut pas la recevoir. */
+  act(action) { return false; }
   /** Appelé par l'adaptateur quand le joueur écrit depuis le jeu ; défini par le client. */
   onChat = null;
+  /** Appelé avec le résultat d'une action : { what, ok, error } ; défini par le client. */
+  onResult = null;
   async shutdown() {}
 }

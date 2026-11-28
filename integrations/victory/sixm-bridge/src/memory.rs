@@ -1,4 +1,5 @@
-//! Reads of this process that fail instead of faulting, and the images mapped in it. Nothing is written.
+//! Reads and writes of this process that fail instead of faulting, and the images mapped in it. Writes go
+//! only where the user's profile says (see `profile`).
 
 use std::ffi::c_void;
 
@@ -6,6 +7,7 @@ use std::ffi::c_void;
 unsafe extern "system" {
     fn GetCurrentProcess() -> *mut c_void;
     fn ReadProcessMemory(process: *mut c_void, base: *const c_void, buffer: *mut c_void, size: usize, read: *mut usize) -> i32;
+    fn WriteProcessMemory(process: *mut c_void, base: *mut c_void, buffer: *const c_void, size: usize, written: *mut usize) -> i32;
     fn K32EnumProcessModules(process: *mut c_void, modules: *mut *mut c_void, bytes: u32, needed: *mut u32) -> i32;
     fn GetModuleFileNameW(module: *mut c_void, name: *mut u16, size: u32) -> u32;
 }
@@ -23,8 +25,17 @@ fn read_u32(address: u64) -> Option<u32> {
     read(address, &mut b).then(|| u32::from_le_bytes(b))
 }
 
-/// Follows a profile chain and reads `N` floats at its end.
-pub fn floats<const N: usize>(base: u64, chain: &[u64]) -> Option<[f32; N]> {
+/// Writes `data` at `address`, or returns false if any byte could not be written (the page is not
+/// writable, or not mapped). Never changes a page's protection.
+pub fn write(address: u64, data: &[u8]) -> bool {
+    let mut done = 0;
+    // SAFETY: the kernel checks the destination range and reports an error; `data` is ours for its length.
+    let ok = unsafe { WriteProcessMemory(GetCurrentProcess(), address as *mut c_void, data.as_ptr().cast(), data.len(), &mut done) };
+    ok != 0 && done == data.len()
+}
+
+/// The address a profile chain ends at, following its pointers.
+pub fn resolve(base: u64, chain: &[u64]) -> Option<u64> {
     let (first, rest) = chain.split_first()?;
     let mut at = base.checked_add(*first)?;
     for offset in rest {
@@ -34,6 +45,12 @@ pub fn floats<const N: usize>(base: u64, chain: &[u64]) -> Option<[f32; N]> {
         }
         at = u64::from_le_bytes(p).checked_add(*offset)?;
     }
+    (at != 0).then_some(at)
+}
+
+/// Follows a profile chain and reads `N` floats at its end.
+pub fn floats<const N: usize>(base: u64, chain: &[u64]) -> Option<[f32; N]> {
+    let at = resolve(base, chain)?;
     let mut out = [0.0; N];
     for (i, v) in out.iter_mut().enumerate() {
         let mut b = [0; 4];
@@ -95,6 +112,16 @@ mod tests {
         assert_eq!(floats::<1>(base, &[0, 0, 0]), None, "null pointer");
         assert_eq!(floats::<1>(u64::MAX, &[8]), None, "overflow");
         assert_eq!(floats::<1>(base, &[]), None);
+    }
+
+    #[test]
+    fn writes_where_it_can() {
+        let mut data = [0f32; 3];
+        let at = resolve(data.as_mut_ptr() as u64, &[4]).unwrap();
+        assert!(write(at, &2.5f32.to_le_bytes()));
+        assert_eq!(data, [0.0, 2.5, 0.0]);
+        assert!(!write(8, &[1]), "unmapped");
+        assert_eq!(resolve(0, &[0]), None);
     }
 
     #[test]

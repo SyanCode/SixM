@@ -78,3 +78,19 @@ pas s'arrêter elle-même.
 
 Un client peut envoyer n'importe quel choix, même d'un menu qu'il n'a pas reçu : vérifiez les droits dans `onMenu`
 (voir `resources/menu/server.js`).
+
+## Agir sur le jeu des joueurs
+`sixm.game` passe par le module SixM compilé dans VIctory, et seulement là où le **profil local** du joueur le permet
+(`teleport = on`, lignes `value.<nom>` : integrations/victory/PROTOCOL.md). Sans profil, ou en démo sans ces lignes,
+rien n'est permis ; le mode démo simule `teleport`, `noclip` et `invincible` pour essayer les menus.
+```js
+sixm.game.abilities(id)                    // { teleport: true, values: [{ name: 'noclip', type: 'u8' }] }
+sixm.game.teleport(id, { x, y, z, h })     // faux si son jeu ne le permet pas
+sixm.game.set(id, 'noclip', 1, { hold: true })  // hold : réécrite à chaque image jusqu'à release
+sixm.game.release(id, 'noclip')
+sixm.on('gameAbilities', (player) => {})   // ce que son jeu permet a changé (sixm.getPlayer(id).game)
+sixm.on('gameResult', (player, { what, ok, error }) => {})  // réponse du jeu à chaque action
+```
+`sixm.getPlayer(id)` donne aussi `located` (position connue) et `game` (ce que son jeu permet). Le mod `menu` s'en sert
+pour « Mon jeu » (no clip, valeurs du profil, aller vers un joueur) et, dans l'administration, « Aller vers lui » et
+« L'amener ici ». Réservez ces actions aux admins : un serveur qui donne le no clip à tous permet de tricher.

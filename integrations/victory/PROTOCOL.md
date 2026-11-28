@@ -6,8 +6,10 @@
   masquer. Les flèches, Entrée, Retour arrière et Échap ne sont prises au jeu que menu ouvert. Il ne connaît pas la position
   du joueur et ne crée pas de personnages. SixM le compile et le lance tout seul.
 - **Module dans VIctory** (`sixm-bridge/`, Rust, MIT) : SixM l'ajoute en compilant VIctory. Il donne la position du
-  joueur et la caméra, lues sans rien écrire, à l'endroit indiqué par un **profil local** de la version du jeu. SixM
-  n'en fournit aucun. Il ne crée pas encore de personnages : SixM Link affiche les noms à leur place dans le monde.
+  joueur et la caméra, à l'endroit indiqué par un **profil local** de la version du jeu. SixM n'en fournit aucun. Il
+  n'écrit dans le jeu que ce que ce profil autorise (téléportation, valeurs nommées : voir plus bas), à la demande des
+  mods du serveur (`sixm.game`, docs/MENUS.md). Il ne crée pas encore de personnages : SixM Link affiche les noms à
+  leur place dans le monde.
 
 ### Profil
 Fichier `~/SixM/profiles/<build>.profile` ; l'interface affiche le `<build>` de votre jeu une fois lancé.
@@ -17,12 +19,26 @@ position = 0x1000, 0x20, 0x90    # trois f32 : x, y, z
 heading  = 0x1000, 0x20, 0xa0    # un f32 en radians (facultatif)
 camera   = 0x2000, 0x0           # seize f32 : matrice vue-projection (facultatif)
 camera_order = row               # row ou column
+teleport = on                    # le serveur peut déplacer le joueur (écrit `position`) ; off par défaut
+value.noclip = u8, 0x3000, 0x18  # une valeur que le serveur peut poser : value.<nom> = <u8|i32|f32>, chaîne
+value.invincible = u8, 0x3000, 0x1c
 ```
 `a` se lit à `base + a` ; `a, b, c` à `[[base + a] + b] + c`. Le fichier est relu pendant la partie.
 
-### Module → SixM
+**Rien n'est écrit sans le profil.** Sans `teleport = on` ni ligne `value.`, le module ne fait que lire. C'est le
+joueur, qui écrit son profil, qui décide ce qu'un serveur peut changer dans son jeu, et sous quel nom. Noms : 1 à 24
+caractères `a-z`, `0-9`, `_` ; 32 valeurs au plus. Le menu fourni connaît `noclip`, `invincible`, `speed`… et
+affiche les autres sous leur nom. Une valeur `u8` y devient une case : cochée, elle est réécrite à chaque image (le
+jeu la remettrait sinon) ; décochée, elle repasse à 0 et le jeu reprend la main.
+
+### Module ⇄ SixM
 Connexion sur `127.0.0.1:SIXM_BRIDGE_PORT`, première ligne : `SIXM_BRIDGE_TOKEN`. Puis `ready` (`build`, `profile`,
-`error`), `localPlayer`, `camera` (`m` : 16 nombres par lignes, `clip = m * (x, y, z, 1)`), `tick`.
+`error`, `teleport`, `values` : `[{"name","type"}]`, ce que le profil permet), `localPlayer`, `camera` (`m` : 16
+nombres par lignes, `clip = m * (x, y, z, 1)`), `tick`.
+
+SixM peut alors envoyer, une ligne chacun : `{"t":"teleport","x","y","z","h"}` (`h` facultatif),
+`{"t":"set","name","value","hold"}` et `{"t":"release","name"}`. Le module répond `{"t":"did","what","ok","error"}`.
+Ce que le profil ne prévoit pas est refusé ; une valeur qui ne tient pas dans son type aussi.
 
 ## Principe
 Le bridge s'exécute dans le processus VIctory, écoute en TCP **127.0.0.1:30121** (loopback

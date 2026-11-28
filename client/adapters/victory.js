@@ -124,6 +124,7 @@ export class VictoryAdapter extends GameAdapter {
   /** Module SixM dans VIctory : il connaît la position et la caméra, le bridge affiche. */
   useModule(module) {
     this.module = module;
+    module.onResult = (r) => this.onResult?.(r);
     module.onCamera = (m) => {
       const p = module.position;
       this.#send({ t: 'view', m, ...(p && { x: p.x, y: p.y, z: p.z }) });
@@ -131,6 +132,8 @@ export class VictoryAdapter extends GameAdapter {
   }
 
   getLocalPlayerPosition() { return this.module?.position ?? this.pos; }
+  getAbilities() { return this.module?.abilities ?? { teleport: false, values: [] }; }
+  act(action) { return this.module?.act(action) ?? false; }
   setRemotePlayer(id, name, pos) {
     this.remotes.set(id, { name, pos });
     this.#send({ t: 'setRemote', id, name, ...pos });

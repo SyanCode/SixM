@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { cleanAbilities, cleanResult } from '../game.js';
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { playerUid, verifyChallenge } from '../identity.js';
@@ -190,6 +191,12 @@ export class Network {
       } else if (m.t === 'event' && typeof m.name === 'string') {
         // Les évènements réseau sont préfixés pour ne pas écraser les évènements internes.
         this.events.emit(`net:${m.name}`, player, ...(Array.isArray(m.args) ? m.args : []));
+      } else if (m.t === 'game') {
+        // Ce que le jeu du joueur permet (profil local) ; le serveur ne fait que s'en servir.
+        player.game = cleanAbilities(m);
+        this.events.emit('gameAbilities', player);
+      } else if (m.t === 'gameResult') {
+        this.events.emit('gameResult', player, cleanResult(m));
       } else if (m.t === 'menuOpen') {
         this.menus?.main(player);
       } else if (m.t === 'menu' && typeof m.menu === 'string' && typeof m.item === 'string') {
