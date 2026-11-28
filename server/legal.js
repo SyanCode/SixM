@@ -85,7 +85,7 @@ const home = (name, description) => `<h1>${esc(name)}</h1>
 const privacy = (name) => `<h1>Politique de confidentialité</h1>
 <p>Dernière mise à jour : ${esc(LEGAL.updated)}</p>
 
-<h2>Qui est responsable de vos données</h2>
+<h2>Responsable du traitement</h2>
 <p>${esc(LEGAL.publisher)} édite le serveur de jeu « ${esc(name)} » et décide des données qu’il traite. Contact : ${esc(LEGAL.email)}.</p>
 
 <h2>Données traitées quand vous jouez</h2>
@@ -103,8 +103,11 @@ const privacy = (name) => `<h1>Politique de confidentialité</h1>
 <li><strong>Journaux du serveur web</strong> qui reçoit les visites de ce site : ils peuvent contenir votre adresse IP. Durée de conservation : ${esc(LEGAL.webLogs)}.</li>
 </ul>
 
-<h2>Pourquoi, et sur quel fondement</h2>
+<h2>Finalités et base légale</h2>
 <p>Le pseudo, l’identifiant et la position servent à faire fonctionner le jeu que vous demandez à rejoindre. L’adresse IP et les bannissements relèvent de l’intérêt légitime de l’éditeur à protéger le serveur et ses joueurs contre les abus.</p>
+
+<h2>Destinataires et sous-traitants</h2>
+<p>Les données sont destinées à l’éditeur, aux administrateurs du serveur et, pour le pseudo et la position, aux autres joueurs connectés. L’hébergeur (${esc(LEGAL.host)}) agit comme sous-traitant pour le stockage et les journaux du serveur web. Aucune donnée n’est vendue.</p>
 
 <h2>Annuaires et réseau local</h2>
 <p>Un serveur public se signale sur le réseau local et s’inscrit auprès des annuaires que son hôte a choisis. Ils reçoivent la fiche publique du serveur (nom, description, nombre de joueurs) et l’adresse du serveur, pas les données des joueurs.</p>
