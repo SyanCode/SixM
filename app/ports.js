@@ -10,6 +10,8 @@ import { PINNED, REPO } from './builder.js';
  *   path   : le chemin dans `env` ; vide, celui que SixM a trouvé seul si l'option a `find`
  *            ({ kind, file } : voir sdks.js), sinon rien
  * fetch : bibliothèques que le portage sait télécharger lui-même (arguments de son victory.exe).
+ * launch(valeurs, exe, console) : arguments de victory.exe quand le portage a son propre lanceur (sinon
+ *   `run <exe> --execute --console <console>`).
  */
 export const PORTS = [
   {
@@ -87,50 +89,41 @@ export const PORTS = [
   },
   {
     id: 'victory-nvidia', name: 'VIctory-NVIDIA', author: 'trustno1-coder',
-    repo: 'https://github.com/trustno1-coder/VIctory-NVIDIA.git', pinned: '29d8dbf7d9892ceb8bec378a9dbc3c4f2931b745',
+    repo: 'https://github.com/trustno1-coder/VIctory-NVIDIA.git', pinned: '64d4931b3dd90305134512b805fc98f04119fb6e',
     url: 'https://github.com/trustno1-coder/VIctory-NVIDIA',
     description: 'Fork de VIctory optimisé pour les cartes NVIDIA GeForce RTX : DLSS, génération d\'images DLSS (RTX 40 et 50) ou FSR 3, menu de réglages F1, statistiques F3. Les fichiers DLSS de NVIDIA ne sont pas fournis. 32 Go de RAM conseillés.',
     tags: ['NVIDIA RTX', 'DLSS'],
     // `victory get-dlss` : les fichiers de NVIDIA, depuis le GitHub de NVIDIA, dans %LOCALAPPDATA%\victory\nvidia-sdk.
     fetch: { streamline: ['get-dlss'] },
-    // Réglages avec lesquels le fork est joué (apps/victory/src/play.rs et scripts/play-foxhound.ps1 du dépôt).
-    env: {
-      VICTORY_THIN: '1', VICTORY_JOIN_PARTS: '8', VICTORY_RELAY: '2', VICTORY_RELAY_COPY: '1', VICTORY_WIDE_BACK: '1',
-      VICTORY_CARD_REHASH_RUNS: '1', VICTORY_JOIN_COPIES: '1', VICTORY_CARD_STEPS: '2', VICTORY_CARD_AWAKE: '1',
-      VICTORY_CARD_BUFFERS_MIN_KB: '64', VICTORY_INDIRECT_WINDOW: '1', VICTORY_INDIRECT_BATCH: '2', VICTORY_UPLOAD_AHEAD: '1',
-      VICTORY_SHOW_AFTER: '1', VICTORY_MAP_THREADS: '1', VICTORY_WC_NO_BACK: '1', VICTORY_WC_NO_BACK_MIN_KB: '1024',
-      VICTORY_SOFT_VIEWS: 'copies', VICTORY_TEXTURE_POOL: '1', VICTORY_RIPE_BLOCKS: '0', VICTORY_TEXTURE_NO_WAIT: '1',
-      VICTORY_TEXTURE_CATCHUP: '0', VICTORY_TEXTURE_STAGE_MS: '16', VICTORY_LEVELS_ON_DEMAND: '0', VICTORY_PRELUDE_UPLOADS: '1',
-      VICTORY_SHOW_NEW_LATER: '1', VICTORY_POOL_SMALL: '0', VICTORY_TABLED_REREAD: '1', VICTORY_QUEUE_HOST_TEXTURES: '0',
-      VICTORY_HEAP_SYNC_FIRST: '1', VICTORY_SYNC_IN_PLACE: '1', VICTORY_SPANS_QUICK: '1', VICTORY_SYNC_FINE: '1',
-      VICTORY_HEAP_SYNC_AT_SUBMIT: '1', VICTORY_AMBIENT: '0.8', VICTORY_AMBIENT_AIR: '1.5', VICTORY_AMBIENT_SPECULAR: '1',
-      VICTORY_EARLY_DEPTH: '1', VICTORY_LEAVE_OUT: '02384a60fda6f2d0,731a39171b568298', VICTORY_PIPELINE_BOOK: '1',
-    },
+    // Lancé par sa propre commande `play`, comme sans SixM : ses réglages (priorités, textures, DLSS, menu F1)
+    // sont ceux de sa version, sans copie à tenir à jour. Elle garde VICTORY_STREAMLINE_DIR et VICTORY_FIDELITYFX_DIR.
+    env: {},
+    launch: (v, exe, console) => [
+      'play', exe, ...(console === 'series-s' ? ['--series-s'] : []), '--res', v.native1440p ? '1440' : '4k',
+      '--dlss', v.dlss ? v.dlssMode : 'off', ...(v.frameGen ? [] : ['--no-framegen-ready']), '--fps', v.fps,
+    ],
     options: [
       {
         id: 'native1440p', type: 'bool', label: 'Image en 2560×1440', default: true,
-        description: 'Profil Series X : image et scène en 1440p. Désactivé, la sortie d\'origine en 3840×2160. À désactiver avec le profil Series S.',
-        on: { VICTORY_NATIVE_1440P: '1' },
+        description: 'Profil Series X : image et scène en 1440p. Désactivé, la sortie d\'origine en 3840×2160.',
       },
       {
         id: 'dlss', type: 'bool', label: 'DLSS', default: true,
         description: 'Remplace la mise à l\'échelle du jeu. Sans les fichiers de NVIDIA, le jeu tourne sans, et l\'indique au démarrage.',
-        on: { VICTORY_DLSS: '1' },
       },
       {
-        id: 'dlssMode', type: 'choice', label: 'Mode DLSS', env: 'VICTORY_DLSS_MODE', default: 'quality',
+        id: 'dlssMode', type: 'choice', label: 'Mode DLSS', default: 'quality',
         choices: [['dlaa', 'DLAA'], ['quality', 'Qualité'], ['balanced', 'Équilibré'], ['performance', 'Performance']],
         description: 'Utilisé seulement quand le DLSS est activé.',
       },
       {
         id: 'frameGen', type: 'bool', label: 'Génération d\'images', default: true,
         description: 'Prête mais éteinte au départ : le menu F1 l\'allume. DLSS sur RTX 40 et 50, sinon FSR 3 (2× au plus, DLL d\'AMD à fournir).',
-        on: { VICTORY_FRAMEGEN: '1', VICTORY_FSR_FRAMEGEN: '1', VICTORY_FRAMEGEN_X: '0', VICTORY_TEXTURE_ROOM_PERCENT: '86' },
       },
       {
-        id: 'fps', type: 'choice', label: 'Limite d\'images/s', env: 'VICTORY_FRAME_INTERVAL_US', default: '1000',
-        choices: [['1000', 'Aucune'], ['8333', '120'], ['16667', '60'], ['', '30 (celle du jeu)']],
-        description: 'Le fork joue sans limite.',
+        id: 'fps', type: 'choice', label: 'Limite d\'images/s', default: '1000',
+        choices: [['1000', 'Aucune'], ['120', '120'], ['60', '60'], ['30', '30 (celle du jeu)']],
+        description: 'Ce que le menu F1 du jeu a enregistré passe avant ces réglages.',
       },
       {
         id: 'streamline', type: 'path', label: 'Dossier DLSS de NVIDIA', env: 'VICTORY_STREAMLINE_DIR', default: '', folder: true,
@@ -170,6 +163,11 @@ export function cleanOptions(port, values = {}) {
   return out;
 }
 
+/** Arguments de victory.exe pour lancer `exe` avec ce portage et ces options. */
+export function portArgs(port, values, exe, console) {
+  return port.launch ? port.launch(cleanOptions(port, values), exe, console) : ['run', exe, '--execute', '--console', console];
+}
+
 /**
  * Variables d'environnement du lancement : réglages du portage, puis options choisies.
  * found : dossiers trouvés par SixM, par option (`findOptions`), pour les chemins laissés vides.
@@ -179,6 +177,7 @@ export function portEnv(port, values = {}, found = {}) {
   const env = { ...port.env };
   for (const o of port.options) {
     if (o.type === 'bool') Object.assign(env, v[o.id] ? o.on ?? {} : o.off ?? {});
+    else if (!o.env) continue; // option lue par `launch`
     else if (v[o.id]) env[o.env] = v[o.id];
     else if (o.type === 'path' && found[o.id]) env[o.env] = found[o.id];
   }

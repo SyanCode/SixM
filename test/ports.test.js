@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createApp } from '../app/server.js';
 import { Settings } from '../app/settings.js';
-import { cleanOptions, customPort, isRepo, portEnv, PORTS } from '../app/ports.js';
+import { cleanOptions, customPort, isRepo, portArgs, portEnv, PORTS } from '../app/ports.js';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'sixm-'));
 
@@ -34,12 +34,14 @@ test('options de lancement : variables d\'environnement du portage', () => {
   assert.deepEqual(portEnv(teq, {}), { VICTORY_THIN: '1', VICTORY_JOIN_PARTS: '8', VICTORY_CARD_REHASH_RUNS: '1', VICTORY_KBM_NATIVE: '1', VICTORY_PORT_STATIC: '1', VICTORY_RAW_VIEWS: '0' }, 'profil NVIDIA recommandé');
   assert.equal(portEnv(teq, { kbm: false, rawViews: true }).VICTORY_KBM_NATIVE, '0');
   const nv = PORTS.find((p) => p.id === 'victory-nvidia');
-  const nvBase = portEnv(nv, {});
-  assert.deepEqual([nvBase.VICTORY_RELAY, nvBase.VICTORY_SOFT_VIEWS, nvBase.VICTORY_NATIVE_1440P, nvBase.VICTORY_DLSS, nvBase.VICTORY_DLSS_MODE], ['2', 'copies', '1', '1', 'quality'], 'réglages du fork');
-  assert.deepEqual([nvBase.VICTORY_FRAMEGEN, nvBase.VICTORY_FRAMEGEN_X, nvBase.VICTORY_FSR_FRAMEGEN, nvBase.VICTORY_FRAME_INTERVAL_US], ['1', '0', '1', '1000'], 'génération d\'images prête, sans limite');
-  const nvOff = portEnv(nv, { dlss: false, frameGen: false, native1440p: false, fps: '', streamline: 'D:\\SL', dlssMode: 'ultra' });
-  assert.deepEqual([nvOff.VICTORY_DLSS, nvOff.VICTORY_FRAMEGEN, nvOff.VICTORY_NATIVE_1440P, nvOff.VICTORY_FRAME_INTERVAL_US], [undefined, undefined, undefined, undefined]);
-  assert.deepEqual([nvOff.VICTORY_STREAMLINE_DIR, nvOff.VICTORY_DLSS_MODE], ['D:\\SL', 'quality']);
+  // Lancé par son propre `play`, comme sans SixM : ses réglages, aucune variable copiée.
+  assert.deepEqual(portEnv(nv, {}), {});
+  assert.deepEqual(portArgs(nv, {}, 'D:\\Jeu\\game.exe', 'series-x'), ['play', 'D:\\Jeu\\game.exe', '--res', '1440', '--dlss', 'quality', '--fps', '1000']);
+  assert.deepEqual(portArgs(nv, { dlss: false, frameGen: false, native1440p: false, fps: '60', dlssMode: 'ultra' }, 'g.exe', 'series-s'),
+    ['play', 'g.exe', '--series-s', '--res', '4k', '--dlss', 'off', '--no-framegen-ready', '--fps', '60']);
+  assert.equal(portArgs(nv, { dlssMode: 'balanced' }, 'g.exe', 'series-x')[5], 'balanced');
+  assert.deepEqual(portEnv(nv, { streamline: 'D:\\SL' }), { VICTORY_STREAMLINE_DIR: 'D:\\SL' }, 'les dossiers passent, play les garde');
+  assert.deepEqual(portArgs(PORTS[0], {}, 'g.exe', 'series-x'), ['run', 'g.exe', '--execute', '--console', 'series-x'], 'les autres : run');
   assert.equal(customPort({ repo: 'https://github.com/a/b', commit: 'x' }).pinned, null, 'sans commit : le dernier publié');
 });
 

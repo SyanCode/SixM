@@ -10,6 +10,15 @@ unsafe extern "system" {
     fn WriteProcessMemory(process: *mut c_void, base: *mut c_void, buffer: *const c_void, size: usize, written: *mut usize) -> i32;
     fn K32EnumProcessModules(process: *mut c_void, modules: *mut *mut c_void, bytes: u32, needed: *mut u32) -> i32;
     fn GetModuleFileNameW(module: *mut c_void, name: *mut u16, size: u32) -> u32;
+    fn GetCurrentThread() -> *mut c_void;
+    fn SetThreadPriority(thread: *mut c_void, priority: i32) -> i32;
+}
+
+/// This thread below normal priority, so the title's threads always come first.
+pub fn lower_priority() {
+    const THREAD_PRIORITY_BELOW_NORMAL: i32 = -1;
+    // SAFETY: the pseudo-handle of the calling thread, always valid for it.
+    unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL) };
 }
 
 /// Fills `out` from `address`, or returns false if any byte is unreadable.

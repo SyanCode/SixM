@@ -8,7 +8,7 @@ import { linkSupported, pickPath, startLink } from '../client/link.js';
 import { isExe, VictoryBuilder } from './builder.js';
 import { Hosts, lanAddress } from './hosts.js';
 import { Discovery, fetchDirectories } from './discovery.js';
-import { cleanOptions, customPort, findOptions, isRepo, portEnv, PORTS } from './ports.js';
+import { cleanOptions, customPort, findOptions, isRepo, portArgs, portEnv, PORTS } from './ports.js';
 import { findSdk, searchRoots } from './sdks.js';
 import { findVictory, Launcher, resolveGame } from './launcher.js';
 import { Session } from './session.js';
@@ -89,6 +89,7 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
     return value;
   };
   const launchEnv = () => portEnv(portOf(settings.value.port), settings.value.portOptions[settings.value.port], found(settings.value.port, true));
+  const launchArgs = (exe, console) => portArgs(portOf(settings.value.port), settings.value.portOptions[settings.value.port], exe, console);
   const victory = current();
   if (!victoryValid() && victory.supported) {
     const known = victory.installed();
@@ -137,7 +138,7 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
       .then(async (ok) => {
         if (!ok) return;
         settings.remember(address);
-        if (game && !launcher.pid) launcher.launch(settings.value.victory, game, launchEnv());
+        if (game && !launcher.pid) launcher.launch(settings.value.victory, game, launchEnv(), launchArgs);
         if (game) session.useModule(launcher.bridge);
         if (victory) await attach();
       })
@@ -217,7 +218,7 @@ export async function createApp({ dataDir, port = 0, adapterOptions, builderOpti
       const game = selectedGame();
       if (!game) throw new Error('choisissez une installation du jeu');
       await launcher.prepare();
-      launcher.launch(settings.value.victory, game, launchEnv());
+      launcher.launch(settings.value.victory, game, launchEnv(), launchArgs);
     },
     'POST /api/game/stop': () => launcher.stop(),
     'GET /api/victory/log': () => ({ text: current().report() }),

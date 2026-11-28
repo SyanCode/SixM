@@ -57,7 +57,7 @@ export function findVictory(victory) {
 }
 
 /** Chemins que le joueur a pu régler lui-même : gardés. Les autres VICTORY_… viennent du portage choisi. */
-const KEPT = ['VICTORY_CONFIG', 'VICTORY_GAME_DIR', 'VICTORY_CACHE_DIR', 'VICTORY_DATA_DIR', 'VICTORY_FIDELITYFX_DIR'];
+const KEPT = ['VICTORY_CONFIG', 'VICTORY_GAME_DIR', 'VICTORY_CACHE_DIR', 'VICTORY_DATA_DIR', 'VICTORY_FIDELITYFX_DIR', 'VICTORY_STREAMLINE_DIR'];
 function portBase() {
   return Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^VICTORY_/i.test(k) || KEPT.includes(k.toUpperCase())));
 }
@@ -95,8 +95,8 @@ export class Launcher {
     if (this.status !== 'running') this.bridge = { port, token: crypto.randomBytes(24).toString('hex') };
   }
 
-  /** extraEnv : réglages du portage (variables VICTORY_…). */
-  launch(victory, game, extraEnv = {}) {
+  /** extraEnv : réglages du portage (variables VICTORY_…) ; argsFor(exe, console) : sa ligne de commande. */
+  launch(victory, game, extraEnv = {}, argsFor = (exe, console) => ['run', exe, '--execute', '--console', console]) {
     if (this.status === 'running') throw new Error('VIctory est déjà lancé');
     const exe = this.check(victory, game);
     fs.mkdirSync(path.dirname(this.logFile), { recursive: true });
@@ -105,7 +105,7 @@ export class Launcher {
     try {
       // detached : pas de console, et la partie survit à la fermeture de SixM.
       // Journal dans un fichier, pas un tube : VIctory ne dépend plus de SixM une fois lancé.
-      child = spawn(victory, ['run', exe, '--execute', '--console', game.console], {
+      child = spawn(victory, argsFor(exe, game.console), {
         cwd: workingDir(victory), detached: true, stdio: ['ignore', log, log],
         // Lu par le module SixM s'il est compilé dans VIctory ; sans effet sinon.
         env: { ...portBase(), ...extraEnv, ...(this.bridge && { SIXM_BRIDGE_PORT: String(this.bridge.port), SIXM_BRIDGE_TOKEN: this.bridge.token, SIXM_PROFILES: this.profiles }) },

@@ -52,7 +52,9 @@ mod server {
             return;
         }
         let profiles = std::env::var_os("SIXM_PROFILES").map(PathBuf::from);
-        let _ = std::thread::Builder::new().name("sixm-bridge".into()).spawn(move || {
+        // A small stack, below the title's threads: the module must never cost the game a frame.
+        let _ = std::thread::Builder::new().name("sixm-bridge".into()).stack_size(256 << 10).spawn(move || {
+            memory::lower_priority();
             match TcpListener::bind((Ipv4Addr::LOCALHOST, port)) {
                 Ok(listener) => serve(&listener, &token, profiles.as_deref()),
                 Err(e) => eprintln!("sixm-bridge: port {port}: {e}"),
@@ -187,7 +189,8 @@ mod server {
     fn read_orders(stream: &TcpStream) -> std::io::Result<mpsc::Receiver<Order>> {
         let (tx, rx) = mpsc::sync_channel(MAX_ORDERS);
         let mut reader = BufReader::new(stream.try_clone()?);
-        let _ = std::thread::Builder::new().name("sixm-bridge-orders".into()).spawn(move || {
+        let _ = std::thread::Builder::new().name("sixm-bridge-orders".into()).stack_size(64 << 10).spawn(move || {
+            memory::lower_priority();
             let mut line = Vec::new();
             loop {
                 match reader.by_ref().take(MAX_ORDER as u64 + 1).read_until(b'\n', &mut line) {

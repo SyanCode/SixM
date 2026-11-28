@@ -316,7 +316,12 @@ export class VictoryBuilder {
       fs.writeFileSync(file, text.replace(pattern, (m) => m + added));
     };
     edit(at('apps', 'victory', 'Cargo.toml'), /^\[dependencies\]\r?\n/m, 'sixm-bridge = { path = "../../crates/sixm-bridge" }\n');
-    edit(at('apps', 'victory', 'src', 'main.rs'), /^fn main\(\)[^{\n]*\{\r?\n/m, '    sixm_bridge::start();\n');
+    // Le module démarre son fil après ce que le portage veut faire avant tout (réserver sa mémoire, choisir
+    // son Direct3D 12), juste avant qu'il lise sa ligne de commande ; sinon en tête de main.
+    const main = at('apps', 'victory', 'src', 'main.rs'), text = fs.readFileSync(main, 'utf8');
+    const late = /^fn main\(\)[^{\n]*\{\r?\n[\s\S]*?^(?=    let cli = )/m;
+    if (/reserve_upload_space|match_d3d12_core/.test(text) && text.split(/^    let cli = /m).length === 2) edit(main, late, '    sixm_bridge::start();\n');
+    else edit(main, /^fn main\(\)[^{\n]*\{\r?\n/m, '    sixm_bridge::start();\n');
     fs.rmSync(at('crates', 'sixm-bridge'), { recursive: true, force: true });
     for (const f of this.module.files) {
       fs.mkdirSync(path.dirname(at('crates', 'sixm-bridge', f.name)), { recursive: true });

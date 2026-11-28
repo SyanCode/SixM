@@ -491,6 +491,7 @@ sealed class Overlay : Form
     readonly Font font = new Font("Segoe UI", 10.5f), bold = new Font("Segoe UI Semibold", 10.5f), small = new Font("Segoe UI", 8.5f);
     IntPtr target;
     bool keys, hidden, drawn;
+    int shownMinute = -1;
     int version = -1;
     Point place;
 
@@ -586,9 +587,11 @@ sealed class Overlay : Form
         bool fading;
         lock (bridge.Lock) fading = bridge.Lines.Count > 0 && (DateTime.UtcNow - bridge.Lines[bridge.Lines.Count - 1].At).TotalSeconds < 16;
         if (!Visible) Show();
-        bool clock;
-        lock (bridge.Lock) clock = bridge.HasWorld && !bridge.WorldFrozen;
-        if (moved || v != version || !drawn || fading || clock) { version = v; drawn = true; Present(); }
+        // L'heure du monde avance d'une minute toutes les 2 s : redessiné quand elle change, pas à chaque tour.
+        int minute;
+        lock (bridge.Lock) minute = bridge.HasWorld && !bridge.WorldFrozen ? (int)((DateTime.UtcNow - bridge.WorldAt).TotalSeconds / 2) : -1;
+        bool clock = minute != shownMinute;
+        if (moved || v != version || !drawn || fading || clock) { version = v; drawn = true; shownMinute = minute; Present(); }
         // Notifications des mods, en haut à droite du jeu.
         Bitmap nb;
         lock (bridge.Lock)
@@ -763,22 +766,31 @@ sealed class Markers : Form
         return true;
     }
 
-    public Bitmap Render(int w, int h, out int count)
+    /// Un nom à l'écran : son cadre et la pointe sous lui.
+    sealed class Label
     {
-        Bitmap b = new Bitmap(w, h, PixelFormat.Format32bppPArgb);
-        count = 0;
-        using (Graphics g = Graphics.FromImage(b))
+        public string Text;
+        public float X, Y;
+        public RectangleF Box;
+    }
+
+    readonly Bitmap measureBitmap = new Bitmap(1, 1);
+    string lastKey;
+
+    /// Les noms visibles dans un écran de w×h, déjà mesurés.
+    List<Label> Labels(int w, int h)
+    {
+        List<Label> list = new List<Label>();
+        using (Graphics g = Graphics.FromImage(measureBitmap))
         {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             lock (bridge.Lock)
             {
-                if (bridge.View == null || (DateTime.UtcNow - bridge.ViewAt).TotalSeconds > 1) return b;
+                if (bridge.View == null || (DateTime.UtcNow - bridge.ViewAt).TotalSeconds > 1) return list;
                 foreach (Remote r in bridge.Remotes.Values)
                 {
                     float x, y;
                     if (!Project(bridge.View, r.X, r.Y, r.Z, w, h, out x, out y)) continue;
-                    count++;
                     string text = r.Name;
                     if (bridge.HasSelf)
                     {
@@ -786,13 +798,42 @@ sealed class Markers : Form
                         text += "  " + (d < 1000 ? Math.Round(d) + " m" : (d / 1000).ToString("0.0") + " km");
                     }
                     SizeF size = g.MeasureString(text, font);
-                    RectangleF box = new RectangleF(x - size.Width / 2 - 8, y - size.Height - 18, size.Width + 16, size.Height + 4);
-                    using (SolidBrush back = new SolidBrush(Color.FromArgb(175, 16, 20, 18))) g.FillRectangle(back, box);
-                    g.DrawString(text, font, Brushes.White, box.X + 8, box.Y + 2);
-                    using (SolidBrush dot = new SolidBrush(Color.FromArgb(246, 184, 60))) g.FillPolygon(dot, new PointF[] { new PointF(x - 6, y - 12), new PointF(x + 6, y - 12), new PointF(x, y - 4) });
+                    Label l = new Label();
+                    l.Text = text; l.X = x; l.Y = y;
+                    l.Box = new RectangleF(x - size.Width / 2 - 8, y - size.Height - 18, size.Width + 16, size.Height + 4);
+                    list.Add(l);
                 }
             }
         }
+        return list;
+    }
+
+    /// Dessine les noms décalés de (dx, dy).
+    void PaintLabels(Graphics g, List<Label> labels, float dx, float dy)
+    {
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+        using (SolidBrush back = new SolidBrush(Color.FromArgb(175, 16, 20, 18)))
+        using (SolidBrush dot = new SolidBrush(Color.FromArgb(246, 184, 60)))
+        {
+            foreach (Label l in labels)
+            {
+                RectangleF box = new RectangleF(l.Box.X + dx, l.Box.Y + dy, l.Box.Width, l.Box.Height);
+                g.FillRectangle(back, box);
+                g.DrawString(l.Text, font, Brushes.White, box.X + 8, box.Y + 2);
+                float x = l.X + dx, y = l.Y + dy;
+                g.FillPolygon(dot, new PointF[] { new PointF(x - 6, y - 12), new PointF(x + 6, y - 12), new PointF(x, y - 4) });
+            }
+        }
+    }
+
+    /// Image de tout l'écran (pour --dump).
+    public Bitmap Render(int w, int h, out int count)
+    {
+        Bitmap b = new Bitmap(w, h, PixelFormat.Format32bppPArgb);
+        List<Label> labels = Labels(w, h);
+        count = labels.Count;
+        using (Graphics g = Graphics.FromImage(b)) PaintLabels(g, labels, 0, 0);
         return b;
     }
 
@@ -801,12 +842,37 @@ sealed class Markers : Form
         bool live;
         lock (bridge.Lock) live = bridge.View != null && (DateTime.UtcNow - bridge.ViewAt).TotalSeconds < 1 && bridge.Remotes.Count > 0;
         Native.RECT r = new Native.RECT();
-        if (target == IntPtr.Zero || !live || !Native.GetClientRect(target, out r) || r.R < 64 || r.B < 64 || r.R > 8192 || r.B > 8192) { if (Visible) Hide(); return; }
+        if (target == IntPtr.Zero || !live || !Native.GetClientRect(target, out r) || r.R < 64 || r.B < 64 || r.R > 8192 || r.B > 8192) { Clear(); return; }
+        List<Label> labels = Labels(r.R, r.B);
+        // Aucun nom à l'écran : aucune fenêtre au-dessus du jeu.
+        if (labels.Count == 0) { Clear(); return; }
         Native.POINT at = new Native.POINT();
         Native.ClientToScreen(target, ref at);
-        if (!Visible) Show();
-        int n;
-        using (Bitmap b = Render(r.R, r.B, out n)) Native.Layer(Handle, b, at.X, at.Y);
+        // Seulement la zone des noms, pas tout l'écran : bien moins à composer pour Windows à chaque image.
+        RectangleF area = labels[0].Box;
+        foreach (Label l in labels) area = RectangleF.Union(area, RectangleF.FromLTRB(l.Box.Left, l.Box.Top, l.Box.Right, l.Y));
+        int left = Math.Max(0, (int)Math.Floor(area.Left) - 2), top = Math.Max(0, (int)Math.Floor(area.Top) - 2);
+        int right = Math.Min(r.R, (int)Math.Ceiling(area.Right) + 2), bottom = Math.Min(r.B, (int)Math.Ceiling(area.Bottom) + 2);
+        if (right - left < 1 || bottom - top < 1) { Clear(); return; }
+        // Rien n'a bougé à l'écran depuis la dernière image : rien à redessiner.
+        StringBuilder key = new StringBuilder();
+        key.Append(at.X).Append(',').Append(at.Y);
+        foreach (Label l in labels) key.Append('|').Append((int)l.X).Append(',').Append((int)l.Y).Append(',').Append(l.Text);
+        string k = key.ToString();
+        if (Visible && k == lastKey) return;
+        lastKey = k;
+        using (Bitmap b = new Bitmap(right - left, bottom - top, PixelFormat.Format32bppPArgb))
+        {
+            using (Graphics g = Graphics.FromImage(b)) PaintLabels(g, labels, -left, -top);
+            if (!Visible) Show();
+            Native.Layer(Handle, b, at.X + left, at.Y + top);
+        }
+    }
+
+    void Clear()
+    {
+        lastKey = null;
+        if (Visible) Hide();
     }
 }
 
